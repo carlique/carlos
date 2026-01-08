@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 direnv exec . bash -lc '
   set -euo pipefail
-  EFI="$(find "$WORKSPACE/Build" -name "CarlOs.efi" | head -n 1)"
+  EFI="$(find "$WORKSPACE/Build" -name "CarlBoot.efi" | head -n 1)"
   if [ -z "${EFI:-}" ] || [ ! -f "$EFI" ]; then
     echo "ERROR: CarlOs.efi not found. Run build first."
     exit 1

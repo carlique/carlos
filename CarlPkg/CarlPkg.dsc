@@ -176,4 +176,4 @@
   VarCheckHiiLib|MdeModulePkg/Library/VarCheckHiiLib/VarCheckHiiLibStandaloneMm.inf
 
 [Components]
-  CarlPkg/Application/CarlOs/CarlOs.inf
+  CarlPkg/Boot/CarlBoot.inf
