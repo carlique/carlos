@@ -1,22 +1,106 @@
 #include <stdint.h>
 #include <carlos/bootinfo.h>
+#include <carlos/pmm.h>
+#include <carlos/kmem.h>
+#include <carlos/uart.h>
+#include <carlos/shell.h>
 
-#define COM1 0x3F8
-
-static inline void outb(uint16_t port, uint8_t val){ __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port)); }
-static inline uint8_t inb(uint16_t port){ uint8_t r; __asm__ volatile ("inb %1, %0" : "=a"(r) : "Nd"(port)); return r; }
-
-static void serial_init(void){
-  outb(COM1+1,0x00); outb(COM1+3,0x80); outb(COM1+0,0x03); outb(COM1+1,0x00);
-  outb(COM1+3,0x03); outb(COM1+2,0xC7); outb(COM1+4,0x0B);
+static void uart_put_hex_u64(uint64_t v) {
+  static const char *hex = "0123456789ABCDEF";
+  uart_puts("0x");
+  for (int i = 60; i >= 0; i -= 4) {
+    uart_putc(hex[(v >> i) & 0xF]);
+  }
 }
-static void serial_putc(char c){ while ((inb(COM1+5)&0x20)==0){} outb(COM1,(uint8_t)c); }
-static void serial_puts(const char* s){ for(;*s;s++){ if(*s=='\n') serial_putc('\r'); serial_putc(*s);} }
+
+static void uart_put_dec_u64(uint64_t v) {
+  // optional: small decimal printer (handy later)
+  char buf[21];
+  int i = 0;
+  if (v == 0) { uart_putc('0'); return; }
+  while (v > 0 && i < (int)sizeof(buf)) {
+    buf[i++] = '0' + (v % 10);
+    v /= 10;
+  }
+  for (int j = i - 1; j >= 0; j--) uart_putc(buf[j]);
+}
 
 __attribute__((noreturn))
 void kmain(BootInfo* bi){
-  serial_init();
-  serial_puts("CarlKernel: hello from kernel!\n");
-  if (bi && bi->magic == CARLOS_BOOTINFO_MAGIC) serial_puts("BootInfo: OK\n");
+  uart_init();
+  shell_run(bi);
+
+  uart_puts("CarlKernel: hello from kernel!\n");
+
+  if (!bi || bi->magic != CARLOS_BOOTINFO_MAGIC) {
+    uart_puts("BootInfo: BAD\n");
+  } else {
+    uart_puts("BootInfo: OK\n");
+
+    extern unsigned char __kernel_start;
+    extern unsigned char __kernel_end;
+
+    uart_puts("Kernel range: ");
+    uart_put_hex_u64((uint64_t)(uintptr_t)&__kernel_start);
+    uart_puts(" - ");
+    uart_put_hex_u64((uint64_t)(uintptr_t)&__kernel_end);
+    uart_puts("\n");
+
+    uart_puts("BootInfo.memmap = ");
+    uart_put_hex_u64(bi->memmap);
+    uart_puts("\nBootInfo.memmap_size = ");
+    uart_put_dec_u64(bi->memmap_size);
+    uart_puts("\nBootInfo.memdesc_size = ");
+    uart_put_dec_u64(bi->memdesc_size);
+    uart_puts("\n");
+    // (optional) print descriptor count only
+    uint64_t count = bi->memmap_size / bi->memdesc_size;
+    uart_puts("MemMap descriptors: ");
+    uart_put_dec_u64(count);
+    uart_puts("\n");
+  }
+
+  pmm_init(bi);
+  uart_puts("PMM free pages = ");
+  uart_put_dec_u64(pmm_free_count());
+  uart_puts("\n");
+
+  kmem_init();
+
+  char *buf = (char*)kmalloc(64);
+  if (!buf) {
+    uart_puts("kmalloc failed\n");
+    for(;;) __asm__("hlt");
+  }
+
+  // Fill it with something and print (ASCII)
+  for (int i = 0; i < 63; i++) buf[i] = 'A' + (i % 26);
+  buf[63] = 0;
+
+  uart_puts("kmalloc ok: ");
+  uart_put_hex_u64((uint64_t)(uintptr_t)buf);
+  uart_puts("\n");
+
+  void *pages[8];
+
+  for (int i = 0; i < 8; i++) {
+    pages[i] = pmm_alloc_page();
+    uart_puts("alloc "); uart_put_dec_u64(i);
+    uart_puts(" = "); uart_put_hex_u64((uint64_t)(uintptr_t)pages[i]);
+    uart_puts("\n");
+    if (!pages[i]) { uart_puts("PMM FAIL\n"); for(;;) __asm__("hlt"); }
+
+    // write pattern
+    uint64_t *q = (uint64_t*)pages[i];
+    q[0] = 0x1111111111111111ULL + (uint64_t)i;
+    q[1] = 0x2222222222222222ULL + (uint64_t)i;
+  }
+
+  for (int i = 0; i < 8; i++) {
+    pmm_free_page(pages[i]);
+  }
+
+  uart_puts("PMM test: freed 8 pages\n");
+
   for(;;) __asm__ volatile ("hlt");
 }

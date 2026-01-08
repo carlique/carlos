@@ -65,6 +65,11 @@ EFI_STATUS Elf64LoadKernel(
   if (Eh->e_ident[4] != ELFCLASS64) return EFI_UNSUPPORTED;
   if (Eh->e_ident[5] != ELFDATA2LSB) return EFI_UNSUPPORTED;
   if (Eh->e_machine != EM_X86_64) return EFI_UNSUPPORTED;
+  // Require fixed-address executable for now (no relocations/PIE yet)
+  if (Eh->e_type != 2 /* ET_EXEC */) {
+    Print(L"ELF type not ET_EXEC (got %u)\n", Eh->e_type);
+    return EFI_UNSUPPORTED;
+  }
 
   // Program header table bounds
   UINTN PhOff = (UINTN)Eh->e_phoff;
@@ -84,11 +89,25 @@ EFI_STATUS Elf64LoadKernel(
     if (Ph[i].p_type != PT_LOAD) continue;
     if (Ph[i].p_memsz == 0) continue;
 
+    if (Ph[i].p_filesz > Ph[i].p_memsz) return EFI_LOAD_ERROR;
+    if (Ph[i].p_type == PT_LOAD && Ph[i].p_filesz > 0) {
+      UINTN Off = (UINTN)Ph[i].p_offset;
+      UINTN Sz  = (UINTN)Ph[i].p_filesz;
+      if (!InBounds(Off, Sz, ElfSize)) return EFI_LOAD_ERROR;
+    }
+
     EFI_PHYSICAL_ADDRESS Seg = (EFI_PHYSICAL_ADDRESS)(Ph[i].p_paddr ? Ph[i].p_paddr : Ph[i].p_vaddr);
     EFI_PHYSICAL_ADDRESS SegEnd = Seg + (EFI_PHYSICAL_ADDRESS)Ph[i].p_memsz;
 
     if (Seg < Min) Min = Seg;
     if (SegEnd > Max) Max = SegEnd;
+
+    if ((EFI_PHYSICAL_ADDRESS)Eh->e_entry < Min || (EFI_PHYSICAL_ADDRESS)Eh->e_entry >= Max) {
+      Print(L"Entry point %lx outside loaded range [%lx, %lx)\n",
+            (UINT64)Eh->e_entry, (UINT64)Min, (UINT64)Max);
+      return EFI_LOAD_ERROR;
+    }
+
     Found = TRUE;
   }
 

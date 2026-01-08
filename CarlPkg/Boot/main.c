@@ -2,13 +2,16 @@
 
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
-#include <Library/MemoryAllocationLib.h>
+#include <Library/BaseMemoryLib.h>        // CopyMem
+#include <Library/MemoryAllocationLib.h>  // FreePool
 
 #include "uefi_log.h"
 #include "uefi_memmap.h"
 #include "uefi_fs.h"
 #include "uefi_elf.h"
 #include "bootinfo.h"
+
+#define KERNEL_PATH L"\\EFI\\CARLOS\\KERNEL.ELF"
 
 // Raw COM1 for post-exit (same as you already have)
 #include <stdint.h>
@@ -34,7 +37,7 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   // 1) Read kernel ELF from ESP
   VOID *KernelBuf = NULL;
   UINTN KernelSize = 0;
-  EFI_STATUS S = FsReadFileToBuffer(ImageHandle, L"\\EFI\\CARLOS\\KERNEL.ELF", &KernelBuf, &KernelSize);
+  EFI_STATUS S = FsReadFileToBuffer(ImageHandle, KERNEL_PATH , &KernelBuf, &KernelSize);
   Print(L"FsReadFileToBuffer -> %r (size=%lu)\n", S, (UINT64)KernelSize);
   if (EFI_ERROR(S)) return S;
 
@@ -43,6 +46,10 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   S = Elf64LoadKernel(KernelBuf, KernelSize, &Entry);
   Print(L"Elf64LoadKernel -> %r entry=%lx\n", S, (UINT64)Entry);
   if (EFI_ERROR(S)) return S;
+  
+  FreePool(KernelBuf);
+  KernelBuf = NULL;
+  KernelSize = 0;
 
   // 3) Allocate BootInfo in a page (so it's easy to reserve later)
   EFI_PHYSICAL_ADDRESS BiAddr = 0;
@@ -51,14 +58,46 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 
   BootInfo *Bi = (BootInfo*)(UINTN)BiAddr;
   Bi->magic = CARLOS_BOOTINFO_MAGIC;
+  Bi->bootinfo = BiAddr;
 
   // 4) ExitBootServices using your proven memmap loop
-  UEFI_MEMMAP Mm = {0};
+  UEFI_MEMMAP Mm = (UEFI_MEMMAP){0};
+
+  EFI_PHYSICAL_ADDRESS MapCopyAddr = 0;
+  UINTN MapCopyPages = 0;
 
   while (1) {
+    // (1) Acquire map (may allocate pool inside UefiMemMapAcquire if needed)
     S = UefiMemMapAcquire(&Mm);
     if (EFI_ERROR(S)) return S;
 
+    // (2) Ensure snapshot buffer is big enough (AllocatePages changes the map)
+    UINTN NeededPages = (Mm.MapSize + 4095) / 4096;
+    if (MapCopyAddr == 0 || NeededPages > MapCopyPages) {
+      if (MapCopyAddr != 0) {
+        gBS->FreePages(MapCopyAddr, MapCopyPages);
+        MapCopyAddr = 0;
+        MapCopyPages = 0;
+      }
+      MapCopyPages = NeededPages;
+      S = gBS->AllocatePages(AllocateAnyPages, EfiLoaderData, MapCopyPages, &MapCopyAddr);
+      if (EFI_ERROR(S)) return S;
+    }
+
+    // (3) Re-acquire map AFTER any allocations/frees, so MapKey is current
+    S = UefiMemMapAcquire(&Mm);
+    if (EFI_ERROR(S)) return S;
+
+    // (4) Copy map to snapshot pages (no allocations here)
+    CopyMem((VOID*)(UINTN)MapCopyAddr, Mm.Map, Mm.MapSize);
+
+    // (5) Fill BootInfo while still in boot services
+    Bi->memmap       = MapCopyAddr;
+    Bi->memmap_size  = Mm.MapSize;
+    Bi->memdesc_size = Mm.DescSize;
+    Bi->memdesc_ver  = Mm.DescVer;
+
+    // (6) ExitBootServices immediately using the fresh MapKey
     S = gBS->ExitBootServices(ImageHandle, Mm.MapKey);
     if (S == EFI_INVALID_PARAMETER) continue;
     break;
