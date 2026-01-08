@@ -12,6 +12,10 @@
 
 [Sources]
   main.c
+  uefi_log.c
+  uefi_memmap.c
+  uefi_fs.c
+  uefi_elf.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -22,4 +26,13 @@
   UefiApplicationEntryPoint
   UefiLib
   UefiBootServicesTableLib
+  MemoryAllocationLib
   SerialPortLib
+  PrintLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+
+[Guids]
+  gEfiFileInfoGuid

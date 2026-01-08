@@ -1,8 +1,9 @@
 #include <Uefi.h>
+#include "uefi_memmap.h"
 
-#include <Library/UefiBootServicesTableLib.h> // gBS, gST
-#include <Library/MemoryAllocationLib.h>      // AllocatePool(), FreePool()
-#include "uefi_log.h"
+#include <Library/UefiBootServicesTableLib.h> // gBS
+#include <Library/MemoryAllocationLib.h>      // AllocatePool, FreePool
+#include <Library/UefiLib.h>                  // Print
 
 static CONST CHAR16* MemTypeStr(EFI_MEMORY_TYPE T)
 {
@@ -26,60 +27,78 @@ static CONST CHAR16* MemTypeStr(EFI_MEMORY_TYPE T)
   }
 }
 
-EFI_STATUS DumpUefiMemoryMap(VOID)
+EFI_STATUS UefiMemMapAcquire(UEFI_MEMMAP *Mm)
 {
+  if (Mm == NULL) return EFI_INVALID_PARAMETER;
+
   EFI_STATUS Status;
 
-  UINTN MemMapSize = 0;
-  EFI_MEMORY_DESCRIPTOR *MemMap = NULL;
-  UINTN MapKey = 0;
-  UINTN DescSize = 0;
-  UINT32 DescVer = 0;
+  // If no buffer yet, do the "size query" to know what to allocate.
+  if (Mm->Map == NULL || Mm->MapCapacity == 0) {
+    UINTN  Size = 0;
+    UINTN  Key  = 0;
+    UINTN  Dsz  = 0;
+    UINT32 Dver = 0;
 
-  // 1) Query required size
-  Status = gBS->GetMemoryMap(&MemMapSize, MemMap, &MapKey, &DescSize, &DescVer);
-  if (Status != EFI_BUFFER_TOO_SMALL) {
-    Logf(L"GetMemoryMap(size query) failed: %r\n", Status);
+    Status = gBS->GetMemoryMap(&Size, NULL, &Key, &Dsz, &Dver);
+    if (Status != EFI_BUFFER_TOO_SMALL) {
+      return Status;
+    }
+
+    // Safety margin: map can grow between calls.
+    Size += 8 * Dsz;
+
+    Mm->Map = (EFI_MEMORY_DESCRIPTOR*)AllocatePool(Size);
+    if (Mm->Map == NULL) return EFI_OUT_OF_RESOURCES;
+
+    Mm->MapCapacity = Size;
+  }
+
+  // Fetch into existing buffer. If too small, reallocate and retry.
+  while (1) {
+    Mm->MapSize = Mm->MapCapacity;
+
+    Status = gBS->GetMemoryMap(
+      &Mm->MapSize,
+      Mm->Map,
+      &Mm->MapKey,
+      &Mm->DescSize,
+      &Mm->DescVer
+    );
+
+    if (Status == EFI_BUFFER_TOO_SMALL) {
+      // Realloc bigger and retry
+      FreePool(Mm->Map);
+      Mm->Map = NULL;
+      Mm->MapCapacity = 0;
+      return UefiMemMapAcquire(Mm);
+    }
+
     return Status;
   }
+}
 
-  // Safety margin: map can grow between calls
-  MemMapSize += 2 * DescSize;
+VOID UefiMemMapPrint(CONST UEFI_MEMMAP *Mm)
+{
+  if (Mm == NULL || Mm->Map == NULL) return;
 
-  // 2) Allocate buffer and fetch map
-  MemMap = (EFI_MEMORY_DESCRIPTOR*)AllocatePool(MemMapSize);
-  if (MemMap == NULL) {
-    Logf(L"AllocatePool(%lu) failed\n", (UINT64)MemMapSize);
-    return EFI_OUT_OF_RESOURCES;
-  }
+  Print(L"UEFI Memory Map: size=%lu descSize=%lu ver=%u key=%lu\n",
+        (UINT64)Mm->MapSize, (UINT64)Mm->DescSize, Mm->DescVer, (UINT64)Mm->MapKey);
 
-  Status = gBS->GetMemoryMap(&MemMapSize, MemMap, &MapKey, &DescSize, &DescVer);
-  if (EFI_ERROR(Status)) {
-    Logf(L"GetMemoryMap(fetch) failed: %r\n", Status);
-    FreePool(MemMap);
-    return Status;
-  }
-
-  Logf(L"UEFI Memory Map: size=%lu descSize=%lu ver=%u key=%lu\n",
-       (UINT64)MemMapSize, (UINT64)DescSize, DescVer, (UINT64)MapKey);
-
-  // 3) Iterate using DescSize (not sizeof(EFI_MEMORY_DESCRIPTOR))
-  UINTN Count = MemMapSize / DescSize;
+  UINTN Count = Mm->MapSize / Mm->DescSize;
   for (UINTN i = 0; i < Count; i++) {
-    EFI_MEMORY_DESCRIPTOR *D = (EFI_MEMORY_DESCRIPTOR *)((UINT8*)MemMap + (i * DescSize));
+    EFI_MEMORY_DESCRIPTOR *D =
+      (EFI_MEMORY_DESCRIPTOR*)((UINT8*)Mm->Map + (i * Mm->DescSize));
 
     UINT64 Start = (UINT64)D->PhysicalStart;
     UINT64 SizeBytes = (UINT64)D->NumberOfPages * 4096ULL;
     UINT64 End = (SizeBytes == 0) ? Start : (Start + SizeBytes - 1);
 
-    Logf(L"%03lu %-12s  %016lx - %016lx  pages=%8lu  attr=%016lx\n",
-         (UINT64)i,
-         MemTypeStr(D->Type),
-         Start, End,
-         (UINT64)D->NumberOfPages,
-         (UINT64)D->Attribute);
+    Print(L"%03lu %-12s  %016lx - %016lx  pages=%8lu  attr=%016lx\n",
+          (UINT64)i,
+          MemTypeStr(D->Type),
+          Start, End,
+          (UINT64)D->NumberOfPages,
+          (UINT64)D->Attribute);
   }
-
-  FreePool(MemMap);
-  return EFI_SUCCESS;
 }

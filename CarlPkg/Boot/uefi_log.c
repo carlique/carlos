@@ -1,10 +1,7 @@
 #include <Uefi.h>
 
-#include <Library/UefiLib.h>          // Print()
-#include <Library/PrintLib.h>         // UnicodeVSPrint()
-#include <Library/SerialPortLib.h>    // SerialPortInitialize(), SerialPortWrite()
-#include <Library/BaseLib.h>          // VA_LIST
-#include <stdarg.h>
+#include <Library/UefiLib.h>       // Print()
+#include <Library/SerialPortLib.h> // SerialPortInitialize(), SerialPortWrite()
 
 static BOOLEAN gSerialReady = FALSE;
 
@@ -26,42 +23,21 @@ static VOID SerialWriteFromUnicode(IN CONST CHAR16 *W)
   for (UINTN i = 0; W[i] != L'\0' && j < sizeof(Buf) - 1; i++) {
     CHAR16 c = W[i];
 
-    // Make terminal-friendly CRLF
     if (c == L'\n') {
-      if (j < sizeof(Buf) - 2) {
-        Buf[j++] = '\r';
-        Buf[j++] = '\n';
-      }
+      if (j < sizeof(Buf) - 2) { Buf[j++] = '\r'; Buf[j++] = '\n'; }
       continue;
     }
 
-    // Basic ASCII-only conversion (good enough for early boot logs)
-    if (c < 0x80) {
-      Buf[j++] = (CHAR8)c;
-    } else {
-      Buf[j++] = '?';
-    }
+    Buf[j++] = (c < 0x80) ? (CHAR8)c : '?';
   }
 
-  Buf[j] = '\0';
   SerialPortWrite((UINT8 *)Buf, j);
 }
 
-VOID Logf(IN CONST CHAR16 *Fmt, ...)
+VOID Log(IN CONST CHAR16 *Msg)
 {
-  if (Fmt == NULL) return;
+  if (Msg == NULL) return;
 
-  // Format once into a Unicode buffer
-  CHAR16 WBuf[1024];
-
-  VA_LIST Args;
-  VA_START(Args, Fmt);
-  UnicodeVSPrint(WBuf, sizeof(WBuf), Fmt, Args);
-  VA_END(Args);
-
-  // Console
-  Print(L"%s", WBuf);
-
-  // Serial
-  SerialWriteFromUnicode(WBuf);
+  Print(L"%s", Msg);
+  SerialWriteFromUnicode(Msg);
 }
