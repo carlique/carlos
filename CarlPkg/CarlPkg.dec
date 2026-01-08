@@ -1,0 +1,12 @@
+## @file
+#  CarlPkg package declaration (minimal).
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001A
+  PACKAGE_NAME                   = CarlPkg
+  PACKAGE_GUID                   = 7C0F1F0A-6B8D-4D0C-9C3D-77C4E9B8E1A1
+  PACKAGE_VERSION                = 0.1
+
+[Includes]
+  CarlPkg

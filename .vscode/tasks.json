@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CarlOs: Build",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/build.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "CarlOs: Copy EFI to ESP",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/copy-efi.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "CarlOs: Run QEMU",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/run-qemu.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "CarlOs: Build + Copy + Run",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "CarlOs: Build",
+        "CarlOs: Copy EFI to ESP",
+        "CarlOs: Run QEMU"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
