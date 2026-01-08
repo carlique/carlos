@@ -1,0 +1,83 @@
+############################################
+# OS / Editor
+############################################
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+*.swp
+*.swo
+
+.vscode/*
+!.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+############################################
+# direnv
+############################################
+.direnv/
+.envrc.local
+
+############################################
+# Build outputs
+############################################
+Build/
+build/
+**/build/
+**/*.o
+**/*.obj
+**/*.a
+**/*.lib
+**/*.dll
+**/*.dylib
+**/*.so
+**/*.exe
+**/*.efi
+**/*.map
+**/*.pdb
+**/*.dSYM/
+**/*.lst
+**/*.log
+
+############################################
+# EDK2 / BaseTools generated
+############################################
+Conf/*.txt
+Conf/*.ini
+Conf/*.log
+Conf/*.conf
+Conf/BuildEnv.sh
+vendor/edk2/Conf/*.txt
+vendor/edk2/Conf/*.ini
+vendor/edk2/Conf/*.log
+vendor/edk2/Conf/BuildEnv.sh
+
+# Python caches
+__pycache__/
+*.pyc
+
+############################################
+# QEMU runtime artifacts (keep firmware in repo if you want)
+############################################
+qemu/**/*.pid
+qemu/**/*.log
+qemu/**/*.nvram
+qemu/**/*.lock
+qemu/**/*.tmp
+
+# If you generate a disk image, ignore it (optional)
+qemu/**/*.img
+
+############################################
+# If you want to keep ESP contents out of git (optional)
+# Comment these out if you DO want to version your BOOTX64.EFI/kernel on the ESP.
+############################################
+qemu/esp/**
+!qemu/esp/.keep
+!qemu/esp/EFI/
+!qemu/esp/EFI/BOOT/
