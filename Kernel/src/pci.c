@@ -181,3 +181,26 @@ if ((header_type & 0x7F) == 0x00) {
 
 return 0;
 }
+
+uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t fun, uint16_t off){
+  return pci_cfg_read32(bus, dev, fun, off);
+}
+
+uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t fun, uint16_t off){
+  uint32_t v = pci_cfg_read32(bus, dev, fun, off & 0xFFC);
+  uint16_t sh = (off & 2) ? 16 : 0;
+  return (uint16_t)((v >> sh) & 0xFFFF);
+}
+
+uint8_t pci_read8(uint8_t bus, uint8_t dev, uint8_t fun, uint16_t off){
+  uint32_t v = pci_cfg_read32(bus, dev, fun, off & 0xFFC);
+  uint16_t sh = (uint16_t)((off & 3) * 8);
+  return (uint8_t)((v >> sh) & 0xFF);
+}
+
+int pci_get_bus_range(uint8_t *start, uint8_t *end){
+  if (!g_ecam_base) return -1;
+  if (start) *start = g_bus_start;
+  if (end)   *end   = g_bus_end;
+  return 0;
+}

@@ -8,6 +8,7 @@
 #include <carlos/fbcon.h>
 #include <carlos/time.h>
 #include <carlos/pci.h>
+#include <carlos/ahci.h>
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -102,6 +103,23 @@ static int parse_bdf_dec3(const char *arg, uint8_t *bus, uint8_t *dev, uint8_t *
   return 0;
 }
 
+static void hexdump_512(const void *p){
+  const uint8_t *b = (const uint8_t*)p;
+  for (int i=0;i<512;i+=16){
+    kprintf("%p: ", (void*)(uintptr_t)(uint64_t)i);
+    for (int j=0;j<16;j++){
+      kprintf("%02x ", (uint32_t)b[i+j]);
+    }
+    kputs(" |");
+    for (int j=0;j<16;j++){
+      char c = (char)b[i+j];
+      if (c < 32 || c > 126) c = '.';
+      kputc(c);
+    }
+    kputs("|\n");
+  }
+}
+
 static void cpu_halt_forever(void){
   for(;;) __asm__ volatile ("hlt");
 }
@@ -123,6 +141,8 @@ static void cmd_help(void){
   kputs("  sleep N - sleep N milliseconds\n");
   kputs("  lspci   - list PCI devices\n");
   kputs("  pcidump BB:DD.F - dump PCI config of device\n");
+  kputs("  ahci    - probe for AHCI controller\n");
+  kputs("  ahci_read <port> <lba> [count] - read sectors via AHCI and hexdump\n");
 }
 
 static void cmd_mem(void){
@@ -198,6 +218,50 @@ static void cmd_pcidump(const char *arg){
   pci_dump_bdf(b, d, f);
 }
 
+static void cmd_ahci(const char *arg){
+  // v1: ignore arg and just auto-probe
+  (void)arg;
+  ahci_probe();
+}
+
+static void cmd_ahci_read(const char *arg){
+  // usage: ahci_read <port> <lba> [count]
+  uint8_t port = 0;
+  uint64_t lba = 0;
+  uint64_t cnt = 1;
+
+  const char *p = skip_ws(arg);
+  if (!p || !*p) { kputs("usage: ahci_read <port> <lba> [count]\n"); return; }
+
+  // port (decimal u8)
+  uint8_t pv=0; const char *e=0;
+  if (parse_dec_u8(p, &pv, &e) != 0) { kputs("bad port\n"); return; }
+  port = pv; p = skip_ws(e);
+
+  // lba (decimal u64)
+  lba = parse_u64(p);
+  while (*p && *p != ' ' && *p != '\t') p++;
+  p = skip_ws(p);
+
+  // optional count
+  if (p && *p) cnt = parse_u64(p);
+  if (cnt == 0) cnt = 1;
+  if (cnt > 8) cnt = 8; // keep it small for now
+
+  // allocate buffer (one page is enough for up to 8 sectors = 4096 bytes)
+  void *buf = pmm_alloc_page();
+  if (!buf) { kputs("no mem\n"); return; }
+
+  int rc = ahci_read(port, lba, (uint32_t)cnt, buf);
+  kprintf("ahci_read rc=%d\n", (int64_t)rc);
+
+  if (rc == 0){
+    hexdump_512(buf);
+  }
+
+  pmm_free_page(buf);
+}
+
 static void run_cmd(char *line){
   if (!line) return;
 
@@ -233,6 +297,8 @@ static void run_cmd(char *line){
 
   if (kstreq(cmd, "lspci")) { cmd_lspci(); return; }
   if (kstreq(cmd, "pcidump")) { cmd_pcidump(arg); return; }
+  if (kstreq(cmd, "ahci")) { cmd_ahci(arg); return; }
+  if (kstreq(cmd, "ahci_read")) { cmd_ahci_read(arg); return; }
 
   kputs("unknown: ");
   kputs(cmd);

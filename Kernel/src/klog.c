@@ -25,32 +25,30 @@ static void sink_puts(const char *s) {
   }
 }
 
-static void put_hex_u64(uint64_t v, int prefix0x, int width, int zero_pad) {
+static void put_hex_u64(uint64_t v, int prefix0x, int width, int zero_pad){
   static const char *hex = "0123456789ABCDEF";
-  char buf[16];
-  int n = 0;
-
   if (prefix0x) sink_puts("0x");
 
-  // build digits (no leading zeros)
+  // Collect digits reversed
+  char tmp[16];
+  int n = 0;
+
   if (v == 0) {
-    buf[n++] = '0';
+    tmp[n++] = '0';
   } else {
     while (v && n < 16) {
-      buf[n++] = hex[v & 0xF];
+      tmp[n++] = hex[v & 0xF];
       v >>= 4;
     }
   }
 
-  // default: keep old behavior (16 digits) if no width specified
-  if (width == 0) width = 16;
+  // Pad to width (minimum digits)
+  while (n < width && n < 16) {
+    tmp[n++] = zero_pad ? '0' : ' ';
+  }
 
-  int pad = width - n;
-  char padc = zero_pad ? '0' : ' ';
-  while (pad-- > 0) sink_putc(padc);
-
-  // emit reversed
-  for (int i = n - 1; i >= 0; i--) sink_putc(buf[i]);
+  // Emit forward
+  for (int i = n - 1; i >= 0; i--) sink_putc(tmp[i]);
 }
 
 static void put_dec_u64(uint64_t v) {
@@ -130,15 +128,18 @@ void kvprintf(const char *fmt, va_list ap) {
 
       case 'p': {
         void *v = va_arg(ap, void*);
-        put_hex_u64((uint64_t)(uintptr_t)v, 1, (int)(sizeof(void*)*2), 1);
+        put_hex_u64((uint64_t)(uintptr_t)v, 1, 16, 1); // fixed 16 digits, zero padded
       } break;
 
       case 'x': {
-        uint64_t v = longlong ? va_arg(ap, unsigned long long)
+        uint64_t v = longlong ? (uint64_t)va_arg(ap, unsigned long long)
                               : (uint64_t)va_arg(ap, unsigned int);
-        put_hex_u64(v, 0, width, zero_pad);
-      } break;
 
+        // default width: 1 digit if no width specified
+        int w = (width > 0) ? width : 1;
+        put_hex_u64(v, 0, w, zero_pad);
+      } break;
+      
       case 'u': {
         uint64_t v = longlong ? va_arg(ap, unsigned long long) : (uint64_t)va_arg(ap, unsigned int);
         put_dec_u64(v);
