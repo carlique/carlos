@@ -5,6 +5,7 @@
 #include <carlos/shell.h>
 #include <carlos/klog.h>
 #include <carlos/acpi.h>
+#include <carlos/pci.h>
 #include <carlos/kapi.h>
 #include <carlos/gdt.h>
 #include <carlos/idt.h>
@@ -47,8 +48,10 @@ void kmain(BootInfo* bi){
 
   acpi_probe(bi);
 
-  time_init();
+  pci_init();
   
+  time_init();
+
   pmm_init(bi);
   kprintf("PMM free pages = %llu\n", (unsigned long long)pmm_free_count());
 

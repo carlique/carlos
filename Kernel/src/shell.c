@@ -1,12 +1,13 @@
 #include <stdint.h>
 #include <carlos/shell.h>
-#include <carlos/uart.h>
 #include <carlos/str.h>
 #include <carlos/pmm.h>
 #include <carlos/kbd.h>
 #include <carlos/klog.h>
+#include <carlos/uart.h>
 #include <carlos/fbcon.h>
 #include <carlos/time.h>
+#include <carlos/pci.h>
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -33,6 +34,74 @@ static uint64_t parse_u64(const char *s){
   return v;
 }
 
+static int hexval(char c){
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+  return -1;
+}
+
+static int parse_hex_u8_1or2(const char *s, uint8_t *out, const char **end){
+  int a = hexval(*s);
+  if (a < 0) return -1;
+  int b = hexval(*(s+1));
+  if (b >= 0) { *out = (uint8_t)((a<<4) | b); if (end) *end = s+2; }
+  else        { *out = (uint8_t)a;            if (end) *end = s+1; }
+  return 0;
+}
+
+// Accept "00:1f.2" or "0:1f.2"
+static int parse_bdf(const char *arg, uint8_t *bus, uint8_t *dev, uint8_t *fun){
+  arg = skip_ws(arg);
+  if (!arg || !*arg) return -1;
+
+  const char *p = arg;
+  if (parse_hex_u8_1or2(p, bus, &p) != 0) return -1;
+  if (*p != ':') return -1;
+  p++;
+
+  if (parse_hex_u8_1or2(p, dev, &p) != 0) return -1;
+  if (*p != '.') return -1;
+  p++;
+
+  int fv = hexval(*p);
+  if (fv < 0) return -1;
+  *fun = (uint8_t)fv;
+  return 0;
+}
+
+static int parse_dec_u8(const char *s, uint8_t *out, const char **end){
+  s = skip_ws(s);
+  if (!s || *s < '0' || *s > '9') return -1;
+  uint32_t v = 0;
+  while (*s >= '0' && *s <= '9') { v = v*10 + (uint32_t)(*s - '0'); s++; }
+  if (v > 255) return -1;
+  *out = (uint8_t)v;
+  if (end) *end = s;
+  return 0;
+}
+
+static int parse_bdf_dec3(const char *arg, uint8_t *bus, uint8_t *dev, uint8_t *fun){
+  const char *p = skip_ws(arg);
+  if (!p || !*p) return -1;
+
+  if (parse_dec_u8(p, bus, &p) != 0) return -1;
+  p = skip_ws(p);
+  if (!*p) return -1;
+
+  if (parse_dec_u8(p, dev, &p) != 0) return -1;
+  p = skip_ws(p);
+  if (!*p) return -1;
+
+  if (parse_dec_u8(p, fun, &p) != 0) return -1;
+
+  // optional trailing whitespace only
+  p = skip_ws(p);
+  if (*p != 0) return -1;
+
+  return 0;
+}
+
 static void cpu_halt_forever(void){
   for(;;) __asm__ volatile ("hlt");
 }
@@ -52,28 +121,17 @@ static void cmd_help(void){
   kputs("  pf      - trigger a page fault (test IDT)\n");
   kputs("  time    - show current time (ns)\n");
   kputs("  sleep N - sleep N milliseconds\n");
+  kputs("  lspci   - list PCI devices\n");
+  kputs("  pcidump BB:DD.F - dump PCI config of device\n");
 }
 
 static void cmd_mem(void){
-  kputs("free pages = ");
-  // minimal decimal print (local)
-  uint64_t v = pmm_free_count();
-  char buf[21]; int i=0;
-  if (v==0){ kputc('0'); kputs("\n"); return; }
-  while (v>0 && i<(int)sizeof(buf)){ buf[i++]='0'+(v%10); v/=10; }
-  for (int j=i-1;j>=0;j--) kputc(buf[j]);
-  kputs("\n");
+  kprintf("free pages = %llu\n", pmm_free_count());
 }
 
 static void cmd_alloc(void){
   void *p = pmm_alloc_page();
-  kputs("alloc page = ");
-  // hex print
-  uint64_t x = (uint64_t)(uintptr_t)p;
-  static const char *hex="0123456789ABCDEF";
-  kputs("0x");
-  for (int i=60;i>=0;i-=4) kputc(hex[(x>>i)&0xF]);
-  kputs("\n");
+  kprintf("alloc page = %p\n", p);
 }
 
 static void cmd_clear(void){
@@ -123,6 +181,23 @@ static void cmd_sleep(const char *arg){
   kprintf("done\n");
 }
 
+static void cmd_lspci(void){
+  pci_list();
+}
+
+static void cmd_pcidump(const char *arg){
+  uint8_t b=0,d=0,f=0;
+
+  if (parse_bdf(arg, &b, &d, &f) != 0) {
+    if (parse_bdf_dec3(arg, &b, &d, &f) != 0) {
+      kprintf("usage: pcidump BB:DD.F  |  pcidump <bus> <dev> <fun>\n");
+      return;
+    }
+  }
+
+  pci_dump_bdf(b, d, f);
+}
+
 static void run_cmd(char *line){
   if (!line) return;
 
@@ -156,13 +231,18 @@ static void run_cmd(char *line){
   if (kstreq(cmd, "time"))   { cmd_time();   return; }
   if (kstreq(cmd, "sleep"))  { cmd_sleep(arg); return; }
 
+  if (kstreq(cmd, "lspci")) { cmd_lspci(); return; }
+  if (kstreq(cmd, "pcidump")) { cmd_pcidump(arg); return; }
+
   kputs("unknown: ");
   kputs(cmd);
   kputs("\n");
 }
 
 void shell_run(const BootInfo *bi){
+  
   (void)bi;
+
   kputs("Carlos shell ready. Type 'help'.\n");
   prompt();
 
