@@ -9,6 +9,8 @@ CFLAGS := -target $(TARGET) -std=c11 -O2 -g \
           -Wall -Wextra -Werror \
           -Iinclude
 
+CFLAGS += -Ithird_party/font8x8
+
 ASFLAGS := -target $(TARGET) -ffreestanding
 
 LDFLAGS := -T linker.ld -nostdlib
@@ -16,12 +18,21 @@ LDFLAGS := -T linker.ld -nostdlib
 BUILD := build
 OUT := $(BUILD)/kernel.elf
 OBJ := $(BUILD)/entry.o $(BUILD)/kmain.o $(BUILD)/pmm.o $(BUILD)/kmem.o \
-       $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o
+       $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o $(BUILD)/kbd.o $(BUILD)/fbcon.o
 
 all: $(OUT)
 
 $(BUILD):
 	mkdir -p $(BUILD)
+
+$(BUILD)/fbcon.o: src/fbcon.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kbd.o: src/kbd.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/klog.o: src/klog.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/uart.o: src/uart.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -31,7 +42,7 @@ $(BUILD)/shell.o: src/shell.c | $(BUILD)
 
 $(BUILD)/str.o: src/str.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
-	
+
 $(BUILD)/pmm.o: src/pmm.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 	

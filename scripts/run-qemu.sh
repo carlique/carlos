@@ -9,4 +9,5 @@ qemu-system-x86_64 \
   -drive if=pflash,format=raw,readonly=on,file=qemu/firmware/OVMF_CODE.fd \
   -drive if=pflash,format=raw,file=qemu/firmware/OVMF_VARS.fd \
   -drive format=raw,file=fat:rw:qemu/esp \
+  -display cocoa \
   -serial mon:stdio

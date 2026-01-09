@@ -16,6 +16,7 @@
   uefi_memmap.c
   uefi_fs.c
   uefi_elf.c
+  uefi_acpi.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -29,10 +30,14 @@
   MemoryAllocationLib
   SerialPortLib
   PrintLib
+  BaseMemoryLib
 
 [Protocols]
   gEfiLoadedImageProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
 
 [Guids]
   gEfiFileInfoGuid
+  gEfiAcpi20TableGuid
+  gEfiAcpi10TableGuid

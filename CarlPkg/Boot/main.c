@@ -4,12 +4,15 @@
 #include <Library/UefiLib.h>
 #include <Library/BaseMemoryLib.h>        // CopyMem
 #include <Library/MemoryAllocationLib.h>  // FreePool
+#include <Protocol/GraphicsOutput.h>
+#include <Guid/Acpi.h>
 
 #include "uefi_log.h"
 #include "uefi_memmap.h"
 #include "uefi_fs.h"
 #include "uefi_elf.h"
 #include "bootinfo.h"
+#include "uefi_acpi.h"
 
 #define KERNEL_PATH L"\\EFI\\CARLOS\\KERNEL.ELF"
 
@@ -66,6 +69,13 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   EFI_PHYSICAL_ADDRESS MapCopyAddr = 0;
   UINTN MapCopyPages = 0;
 
+  Bi->acpi_rsdp = FindAcpiRsdp(SystemTable, &Bi->acpi_revision);
+  if (Bi->acpi_rsdp == 0) {
+    Print(L"ACPI RSDP not found\n");
+  } else {
+    Print(L"ACPI RSDP=%lx rev=%u\n", Bi->acpi_rsdp, Bi->acpi_revision);
+  }
+
   while (1) {
     // (1) Acquire map (may allocate pool inside UefiMemMapAcquire if needed)
     S = UefiMemMapAcquire(&Mm);
@@ -96,6 +106,22 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     Bi->memmap_size  = Mm.MapSize;
     Bi->memdesc_size = Mm.DescSize;
     Bi->memdesc_ver  = Mm.DescVer;
+
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop = NULL;
+    S = gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&Gop);
+
+    if (!EFI_ERROR(S) && Gop && Gop->Mode && Gop->Mode->Info) {
+      Bi->fb_base   = (EFI_PHYSICAL_ADDRESS)Gop->Mode->FrameBufferBase;
+      Bi->fb_size   = (UINTN)Gop->Mode->FrameBufferSize;
+      Bi->fb_width  = (UINT32)Gop->Mode->Info->HorizontalResolution;
+      Bi->fb_height = (UINT32)Gop->Mode->Info->VerticalResolution;
+      Bi->fb_ppsl   = (UINT32)Gop->Mode->Info->PixelsPerScanLine;
+      Bi->fb_format = (UINT32)Gop->Mode->Info->PixelFormat;
+    } else {
+      Bi->fb_base = 0;
+      Bi->fb_size = 0;
+      Bi->fb_width = Bi->fb_height = Bi->fb_ppsl = Bi->fb_format = 0;
+    }
 
     // (6) ExitBootServices immediately using the fresh MapKey
     S = gBS->ExitBootServices(ImageHandle, Mm.MapKey);
