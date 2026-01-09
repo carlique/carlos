@@ -22,6 +22,8 @@ typedef struct BootInfo {
   UINT32               fb_ppsl;     // pixels per scanline (pitch in pixels)
   UINT32               fb_format;   // EFI_GRAPHICS_PIXEL_FORMAT
 
-  EFI_PHYSICAL_ADDRESS acpi_rsdp;     // physical address
-  UINT32               acpi_revision; // 0/1 or 2+
+  EFI_PHYSICAL_ADDRESS acpi_rsdp;
+  UINT32               acpi_guid_kind;   // 1 = ACPI10 GUID, 2 = ACPI20 GUID
+  UINT8                rsdp_revision;     // ACPI spec: 0 (v1), 2 (v2+)
+  UINT8                _pad8[3];
 } BootInfo;

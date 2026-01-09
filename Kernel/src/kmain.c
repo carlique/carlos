@@ -4,6 +4,10 @@
 #include <carlos/kmem.h>
 #include <carlos/shell.h>
 #include <carlos/klog.h>
+#include <carlos/acpi.h>
+#include <carlos/kapi.h>
+
+void acpi_probe(const BootInfo *bi);
 
 __attribute__((noreturn))
 void kmain(BootInfo* bi){
@@ -32,10 +36,14 @@ void kmain(BootInfo* bi){
   kprintf("BootInfo.memdesc_size = %llu\n", (unsigned long long)bi->memdesc_size);
   kprintf("BootInfo.memdesc_ver  = %u\n", bi->memdesc_ver);
 
+  acpi_probe(bi);
+
   pmm_init(bi);
   kprintf("PMM free pages = %llu\n", (unsigned long long)pmm_free_count());
 
   kmem_init();
+
+  kprintf("Carlos ABI v%u\n", g_api.abi_version);
 
   // Quick heap sanity (optional)
   char *buf = (char*)kmalloc(64);

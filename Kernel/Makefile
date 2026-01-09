@@ -9,6 +9,8 @@ CFLAGS := -target $(TARGET) -std=c11 -O2 -g \
           -Wall -Wextra -Werror \
           -Iinclude
 
+CFLAGS += -I../Common/include
+
 CFLAGS += -Ithird_party/font8x8
 
 ASFLAGS := -target $(TARGET) -ffreestanding
@@ -18,13 +20,20 @@ LDFLAGS := -T linker.ld -nostdlib
 BUILD := build
 OUT := $(BUILD)/kernel.elf
 OBJ := $(BUILD)/entry.o $(BUILD)/kmain.o $(BUILD)/pmm.o $(BUILD)/kmem.o \
-       $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o $(BUILD)/kbd.o $(BUILD)/fbcon.o
+       $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o \
+	   $(BUILD)/kbd.o $(BUILD)/fbcon.o $(BUILD)/kapi.o $(BUILD)/acpi.o
 
 all: $(OUT)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+$(BUILD)/acpi.o: src/acpi.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+	
+$(BUILD)/kapi.o: src/kapi.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+	
 $(BUILD)/fbcon.o: src/fbcon.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 

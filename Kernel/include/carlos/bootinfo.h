@@ -20,6 +20,8 @@ typedef struct BootInfo {
   uint32_t fb_ppsl;
   uint32_t fb_format;
 
-  uint64_t acpi_rsdp;     // physical address
-  uint32_t acpi_revision; // 0/1 or 2+
+  uint64_t acpi_rsdp;
+  uint32_t acpi_guid_kind;
+  uint8_t  rsdp_revision;
+  uint8_t  _pad8[3];
 } BootInfo;

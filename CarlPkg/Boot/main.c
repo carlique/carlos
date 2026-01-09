@@ -69,12 +69,40 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   EFI_PHYSICAL_ADDRESS MapCopyAddr = 0;
   UINTN MapCopyPages = 0;
 
-  Bi->acpi_rsdp = FindAcpiRsdp(SystemTable, &Bi->acpi_revision);
-  if (Bi->acpi_rsdp == 0) {
-    Print(L"ACPI RSDP not found\n");
+  EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop = NULL;
+  S = gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&Gop);
+
+  if (!EFI_ERROR(S) && Gop && Gop->Mode && Gop->Mode->Info) {
+    Bi->fb_base   = (EFI_PHYSICAL_ADDRESS)Gop->Mode->FrameBufferBase;
+    Bi->fb_size   = (UINTN)Gop->Mode->FrameBufferSize;
+    Bi->fb_width  = (UINT32)Gop->Mode->Info->HorizontalResolution;
+    Bi->fb_height = (UINT32)Gop->Mode->Info->VerticalResolution;
+    Bi->fb_ppsl   = (UINT32)Gop->Mode->Info->PixelsPerScanLine;
+    Bi->fb_format = (UINT32)Gop->Mode->Info->PixelFormat;
   } else {
-    Print(L"ACPI RSDP=%lx rev=%u\n", Bi->acpi_rsdp, Bi->acpi_revision);
+    Bi->fb_base = 0;
+    Bi->fb_size = 0;
+    Bi->fb_width = Bi->fb_height = Bi->fb_ppsl = Bi->fb_format = 0;
   }
+
+  Bi->acpi_rsdp = FindAcpiRsdp(SystemTable, &Bi->acpi_guid_kind);
+
+  Bi->rsdp_revision = 0;
+  if (Bi->acpi_rsdp) {
+    // ACPI 1.0 RSDP layout begins with signature + checksum + OEM + Revision
+    typedef struct {
+      CHAR8   Signature[8];
+      UINT8   Checksum;
+      CHAR8   OemId[6];
+      UINT8   Revision;
+    } RSDP_V1_MIN;
+
+    RSDP_V1_MIN *R = (RSDP_V1_MIN*)(UINTN)Bi->acpi_rsdp;
+    Bi->rsdp_revision = R->Revision;
+  }
+
+  Print(L"ACPI: RSDP=%lx guid_kind=%u rsdp_rev=%u\n",
+        Bi->acpi_rsdp, Bi->acpi_guid_kind, Bi->rsdp_revision);
 
   while (1) {
     // (1) Acquire map (may allocate pool inside UefiMemMapAcquire if needed)
@@ -106,22 +134,6 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     Bi->memmap_size  = Mm.MapSize;
     Bi->memdesc_size = Mm.DescSize;
     Bi->memdesc_ver  = Mm.DescVer;
-
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop = NULL;
-    S = gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL, (VOID**)&Gop);
-
-    if (!EFI_ERROR(S) && Gop && Gop->Mode && Gop->Mode->Info) {
-      Bi->fb_base   = (EFI_PHYSICAL_ADDRESS)Gop->Mode->FrameBufferBase;
-      Bi->fb_size   = (UINTN)Gop->Mode->FrameBufferSize;
-      Bi->fb_width  = (UINT32)Gop->Mode->Info->HorizontalResolution;
-      Bi->fb_height = (UINT32)Gop->Mode->Info->VerticalResolution;
-      Bi->fb_ppsl   = (UINT32)Gop->Mode->Info->PixelsPerScanLine;
-      Bi->fb_format = (UINT32)Gop->Mode->Info->PixelFormat;
-    } else {
-      Bi->fb_base = 0;
-      Bi->fb_size = 0;
-      Bi->fb_width = Bi->fb_height = Bi->fb_ppsl = Bi->fb_format = 0;
-    }
 
     // (6) ExitBootServices immediately using the fresh MapKey
     S = gBS->ExitBootServices(ImageHandle, Mm.MapKey);
