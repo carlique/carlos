@@ -20,6 +20,11 @@ static void cpu_halt_forever(void){
   for(;;) __asm__ volatile ("hlt");
 }
 
+static void cmd_pf(void){
+  volatile uint64_t *p = (volatile uint64_t*)0xDEADBEEF000ULL;
+  *p = 1; // should fault -> #PF vec=14, CR2 = that address
+}
+
 static void prompt(void){
   kputs("carlos> ");
 }
@@ -32,6 +37,7 @@ static void cmd_help(void){
   kputs("  clear  - clear screen\n");
   kputs("  halt   - stop CPU\n");
   kputs("  reboot - reboot machine\n");
+  kputs("  pf      - trigger a page fault (test IDT)\n");
 }
 
 static void cmd_mem(void){
@@ -93,6 +99,10 @@ static void run_cmd(const char *line){
   if (kstreq(line, "clear")) { cmd_clear(); return; }
   if (kstreq(line, "halt")) { cmd_halt(); return; }
   if (kstreq(line, "reboot")) { cmd_reboot(); return; }
+  if (kstreq(line, "pf")) {
+    kprintf("Triggering page fault...\n");
+    cmd_pf();
+  }
   if (kstrlen(line) == 0) return;
 
   kputs("unknown: ");

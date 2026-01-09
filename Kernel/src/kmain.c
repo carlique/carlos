@@ -6,6 +6,8 @@
 #include <carlos/klog.h>
 #include <carlos/acpi.h>
 #include <carlos/kapi.h>
+#include <carlos/gdt.h>
+#include <carlos/idt.h>
 
 void acpi_probe(const BootInfo *bi);
 
@@ -14,6 +16,12 @@ void kmain(BootInfo* bi){
   klog_init();
   kprintf("CarlKernel: hello from kernel!\n");
 
+  gdt_init();
+  kprintf("GDT/TSS: OK\n");
+
+  idt_init();
+  kprintf("IDT: OK\n");
+      
   if (!bi || bi->magic != CARLOS_BOOTINFO_MAGIC) {
     kprintf("BootInfo: BAD\n");
     for(;;) __asm__ volatile ("hlt");

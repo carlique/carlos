@@ -21,16 +21,29 @@ BUILD := build
 OUT := $(BUILD)/kernel.elf
 OBJ := $(BUILD)/entry.o $(BUILD)/kmain.o $(BUILD)/pmm.o $(BUILD)/kmem.o \
        $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o \
-	   $(BUILD)/kbd.o $(BUILD)/fbcon.o $(BUILD)/kapi.o $(BUILD)/acpi.o
+	   $(BUILD)/kbd.o $(BUILD)/fbcon.o $(BUILD)/kapi.o $(BUILD)/acpi.o \
+	   $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_s.o $(BUILD)/gdt.o
 
 all: $(OUT)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/acpi.o: src/acpi.c | $(BUILD)
+$(BUILD)/gdt.o: src/gdt.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 	
+$(BUILD)/idt.o: src/idt.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/isr.o: src/isr.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/isr_s.o: src/isr.S | $(BUILD)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/acpi.o: src/acpi.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD)/kapi.o: src/kapi.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 	
