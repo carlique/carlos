@@ -105,14 +105,17 @@ static int parse_bdf_dec3(const char *arg, uint8_t *bus, uint8_t *dev, uint8_t *
 
 static void hexdump_512(const void *p){
   const uint8_t *b = (const uint8_t*)p;
-  for (int i=0;i<512;i+=16){
-    kprintf("%p: ", (void*)(uintptr_t)(uint64_t)i);
-    for (int j=0;j<16;j++){
-      kprintf("%02x ", (uint32_t)b[i+j]);
+
+  for (uint32_t i = 0; i < 512; i += 16){
+    kprintf("0x%08x: ", i);
+
+    for (int j = 0; j < 16; j++){
+      kprintf("%02x ", (unsigned)b[i + j]);
     }
+
     kputs(" |");
-    for (int j=0;j<16;j++){
-      char c = (char)b[i+j];
+    for (int j = 0; j < 16; j++){
+      char c = (char)b[i + j];
       if (c < 32 || c > 126) c = '.';
       kputc(c);
     }

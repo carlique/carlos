@@ -25,30 +25,24 @@ static void sink_puts(const char *s) {
   }
 }
 
-static void put_hex_u64(uint64_t v, int prefix0x, int width, int zero_pad){
+static void put_hex_u64_fmt(uint64_t v, int prefix0x, int width, int pad_zero) {
   static const char *hex = "0123456789ABCDEF";
-  if (prefix0x) sink_puts("0x");
-
-  // Collect digits reversed
-  char tmp[16];
+  char buf[16];
   int n = 0;
 
-  if (v == 0) {
-    tmp[n++] = '0';
-  } else {
-    while (v && n < 16) {
-      tmp[n++] = hex[v & 0xF];
-      v >>= 4;
-    }
-  }
+  // digits (LSB first)
+  do {
+    buf[n++] = hex[v & 0xF];
+    v >>= 4;
+  } while (v && n < (int)sizeof(buf));
 
-  // Pad to width (minimum digits)
-  while (n < width && n < 16) {
-    tmp[n++] = zero_pad ? '0' : ' ';
-  }
+  if (width < n) width = n;
 
-  // Emit forward
-  for (int i = n - 1; i >= 0; i--) sink_putc(tmp[i]);
+  if (prefix0x) sink_puts("0x");
+
+  char pad = pad_zero ? '0' : ' ';
+  for (int i = n; i < width; i++) sink_putc(pad);
+  for (int i = n - 1; i >= 0; i--) sink_putc(buf[i]);
 }
 
 static void put_dec_u64(uint64_t v) {
@@ -126,20 +120,18 @@ void kvprintf(const char *fmt, va_list ap) {
         sink_putc((char)c);
       } break;
 
+      // keep your parsing of zero_pad + width + longlong
       case 'p': {
         void *v = va_arg(ap, void*);
-        put_hex_u64((uint64_t)(uintptr_t)v, 1, 16, 1); // fixed 16 digits, zero padded
+        put_hex_u64_fmt((uint64_t)(uintptr_t)v, 1, 16, 1);   // 0x + 16 hex digits
       } break;
 
       case 'x': {
         uint64_t v = longlong ? (uint64_t)va_arg(ap, unsigned long long)
                               : (uint64_t)va_arg(ap, unsigned int);
-
-        // default width: 1 digit if no width specified
-        int w = (width > 0) ? width : 1;
-        put_hex_u64(v, 0, w, zero_pad);
+        put_hex_u64_fmt(v, 0, width ? width : 1, zero_pad);  // supports %02x etc
       } break;
-      
+
       case 'u': {
         uint64_t v = longlong ? va_arg(ap, unsigned long long) : (uint64_t)va_arg(ap, unsigned int);
         put_dec_u64(v);
