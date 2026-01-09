@@ -8,6 +8,7 @@
 #include <carlos/kapi.h>
 #include <carlos/gdt.h>
 #include <carlos/idt.h>
+#include <carlos/time.h>
 
 void acpi_probe(const BootInfo *bi);
 
@@ -46,6 +47,8 @@ void kmain(BootInfo* bi){
 
   acpi_probe(bi);
 
+  time_init();
+  
   pmm_init(bi);
   kprintf("PMM free pages = %llu\n", (unsigned long long)pmm_free_count());
 

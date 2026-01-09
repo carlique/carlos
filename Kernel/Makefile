@@ -22,13 +22,20 @@ OUT := $(BUILD)/kernel.elf
 OBJ := $(BUILD)/entry.o $(BUILD)/kmain.o $(BUILD)/pmm.o $(BUILD)/kmem.o \
        $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o \
 	   $(BUILD)/kbd.o $(BUILD)/fbcon.o $(BUILD)/kapi.o $(BUILD)/acpi.o \
-	   $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_s.o $(BUILD)/gdt.o
+	   $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_s.o $(BUILD)/gdt.o \
+	   $(BUILD)/hpet.o $(BUILD)/time.o
 
 all: $(OUT)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+$(BUILD)/hpet.o: src/hpet.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/time.o: src/time.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+	
 $(BUILD)/gdt.o: src/gdt.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 	

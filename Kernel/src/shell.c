@@ -6,23 +6,35 @@
 #include <carlos/kbd.h>
 #include <carlos/klog.h>
 #include <carlos/fbcon.h>
+#include <carlos/time.h>
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
+
 static inline uint8_t inb(uint16_t port){
   uint8_t r;
   __asm__ volatile ("inb %1, %0" : "=a"(r) : "Nd"(port));
   return r;
 }
 
-static void cpu_halt_forever(void){
-  for(;;) __asm__ volatile ("hlt");
+static const char* skip_ws(const char *s){
+  while (s && (*s == ' ' || *s == '\t')) s++;
+  return s;
 }
 
-static void cmd_pf(void){
-  volatile uint64_t *p = (volatile uint64_t*)0xDEADBEEF000ULL;
-  *p = 1; // should fault -> #PF vec=14, CR2 = that address
+static uint64_t parse_u64(const char *s){
+  s = skip_ws(s);
+  uint64_t v = 0;
+  while (*s >= '0' && *s <= '9') {
+    v = v * 10 + (uint64_t)(*s - '0');
+    s++;
+  }
+  return v;
+}
+
+static void cpu_halt_forever(void){
+  for(;;) __asm__ volatile ("hlt");
 }
 
 static void prompt(void){
@@ -38,6 +50,8 @@ static void cmd_help(void){
   kputs("  halt   - stop CPU\n");
   kputs("  reboot - reboot machine\n");
   kputs("  pf      - trigger a page fault (test IDT)\n");
+  kputs("  time    - show current time (ns)\n");
+  kputs("  sleep N - sleep N milliseconds\n");
 }
 
 static void cmd_mem(void){
@@ -92,21 +106,58 @@ static void cmd_reboot(void){
   cpu_halt_forever();
 }
 
-static void run_cmd(const char *line){
-  if (kstreq(line, "help")) { cmd_help(); return; }
-  if (kstreq(line, "mem"))  { cmd_mem();  return; }
-  if (kstreq(line, "alloc")){ cmd_alloc();return; }
-  if (kstreq(line, "clear")) { cmd_clear(); return; }
-  if (kstreq(line, "halt")) { cmd_halt(); return; }
-  if (kstreq(line, "reboot")) { cmd_reboot(); return; }
-  if (kstreq(line, "pf")) {
-    kprintf("Triggering page fault...\n");
-    cmd_pf();
+static void cmd_pf(void){
+  kprintf("Triggering page fault...\n");
+  volatile uint64_t *p = (volatile uint64_t*)0xDEADBEEF000ULL;
+  *p = 1; // should fault -> #PF vec=14, CR2 = that address
+}
+
+static void cmd_time(void){
+  kprintf("now_ns=%llu\n", time_now_ns());
+}
+
+static void cmd_sleep(const char *arg){
+  uint64_t ms = parse_u64(arg);
+  kprintf("sleep %llu ms...\n", ms);
+  time_sleep_ms(ms);
+  kprintf("done\n");
+}
+
+static void run_cmd(char *line){
+  if (!line) return;
+
+  // Trim leading whitespace
+  char *cmd = line;
+  while (*cmd == ' ' || *cmd == '\t') cmd++;
+
+  // If empty line, nothing to do
+  if (*cmd == 0) return;
+
+  // Split into cmd + arg (in-place)
+  char *arg = 0;
+  for (char *q = cmd; *q; q++){
+    if (*q == ' ' || *q == '\t'){
+      *q = 0;                 // terminate command token
+      arg = q + 1;            // argument string (may have leading ws)
+      break;
+    }
   }
-  if (kstrlen(line) == 0) return;
+  if (arg) arg = (char*)skip_ws(arg);
+
+  // Dispatch (always return after handling)
+  if (kstreq(cmd, "help"))   { cmd_help();   return; }
+  if (kstreq(cmd, "mem"))    { cmd_mem();    return; }
+  if (kstreq(cmd, "alloc"))  { cmd_alloc();  return; }
+  if (kstreq(cmd, "clear"))  { cmd_clear();  return; }
+  if (kstreq(cmd, "halt"))   { cmd_halt();   return; }
+  if (kstreq(cmd, "reboot")) { cmd_reboot(); return; }
+
+  if (kstreq(cmd, "pf"))     { cmd_pf();     return; }
+  if (kstreq(cmd, "time"))   { cmd_time();   return; }
+  if (kstreq(cmd, "sleep"))  { cmd_sleep(arg); return; }
 
   kputs("unknown: ");
-  kputs(line);
+  kputs(cmd);
   kputs("\n");
 }
 

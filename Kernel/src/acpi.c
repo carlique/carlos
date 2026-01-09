@@ -4,6 +4,10 @@
 #include <carlos/bootinfo.h>
 #include <carlos/klog.h>
 
+static const AcpiSdtHeader *g_rsdt = 0;
+static const uint32_t      *g_rsdt_ent = 0;
+static uint32_t             g_rsdt_count = 0;
+
 static int sig8_eq(const char s[8], const char *lit){
   for (int i=0;i<8;i++) if (s[i] != lit[i]) return 0;
   return 1;
@@ -96,6 +100,24 @@ static void madt_dump(const AcpiMadt *madt){
   }
 }
 
+const void* acpi_find_sdt(const char sig4[4]){
+  if (!g_rsdt || !g_rsdt_ent || g_rsdt_count == 0) return 0;
+
+  for (uint32_t i = 0; i < g_rsdt_count; i++) {
+    uint64_t phys = (uint64_t)g_rsdt_ent[i];
+    const AcpiSdtHeader *h = (const AcpiSdtHeader*)(uintptr_t)phys;
+
+    if (sig4_eq(h->Signature, sig4)) {
+      // Optional safety: basic length + checksum
+      if (h->Length < sizeof(AcpiSdtHeader)) return 0;
+      if (!checksum_ok(h, h->Length)) return 0;
+      return (const void*)h;
+    }
+  }
+
+  return 0;
+}
+
 void acpi_probe(const BootInfo *bi){
   if (!bi || !bi->acpi_rsdp){
     kprintf("ACPI: no RSDP\n");
@@ -148,6 +170,10 @@ void acpi_probe(const BootInfo *bi){
 
   uint32_t entry_count = (rsdt->Length - sizeof(AcpiSdtHeader)) / 4;
   const uint32_t *ent = (const uint32_t*)((const uint8_t*)rsdt + sizeof(AcpiSdtHeader));
+
+  g_rsdt = rsdt;
+  g_rsdt_ent = ent;
+  g_rsdt_count = entry_count;
 
   kprintf("ACPI: RSDT entries=%u\n", entry_count);
 
