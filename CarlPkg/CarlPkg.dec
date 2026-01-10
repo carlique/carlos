@@ -10,3 +10,4 @@
 
 [Includes]
   CarlPkg
+   Common/include

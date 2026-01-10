@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <carlos/bootinfo.h>
+#include <carlos/boot/bootinfo.h>
 #include <carlos/pmm.h>
 #include <carlos/kmem.h>
 #include <carlos/shell.h>

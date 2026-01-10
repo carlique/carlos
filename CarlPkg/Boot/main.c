@@ -7,11 +7,11 @@
 #include <Protocol/GraphicsOutput.h>
 #include <Guid/Acpi.h>
 
+#include <carlos/boot/bootinfo.h>
 #include "uefi_log.h"
 #include "uefi_memmap.h"
 #include "uefi_fs.h"
 #include "uefi_elf.h"
-#include "bootinfo.h"
 #include "uefi_acpi.h"
 
 #define KERNEL_PATH L"\\EFI\\CARLOS\\KERNEL.ELF"
@@ -60,8 +60,13 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   if (EFI_ERROR(S)) return S;
 
   BootInfo *Bi = (BootInfo*)(UINTN)BiAddr;
+
+  // IMPORTANT: wipe the whole struct (pads + future fields)
+  ZeroMem(Bi, sizeof(*Bi));
+
   Bi->magic = CARLOS_BOOTINFO_MAGIC;
-  Bi->bootinfo = BiAddr;
+  Bi->abi_version = 1;                 // or CARLOS_ABI_VERSION constant
+  Bi->bootinfo_phys = (uint64_t)BiAddr; // physical address of BootInfo
 
   // 4) ExitBootServices using your proven memmap loop
   UEFI_MEMMAP Mm = (UEFI_MEMMAP){0};

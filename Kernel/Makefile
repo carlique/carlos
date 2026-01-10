@@ -97,3 +97,11 @@ clean:
 	rm -rf $(BUILD)
 
 .PHONY: all clean
+
+ESP_KERNEL := ../qemu/esp/EFI/CARLOS/KERNEL.ELF
+
+install: $(OUT)
+	mkdir -p $(dir $(ESP_KERNEL))
+	cp $(OUT) $(ESP_KERNEL)
+
+all: $(OUT)
