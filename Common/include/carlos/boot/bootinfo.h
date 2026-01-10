@@ -12,6 +12,9 @@
 
 #define CARLOS_BOOTINFO_MAGIC 0x4341524C4F53424FULL  // "CARLOSBO" (example)
 
+#define CARLOS_PATH_MAX  128
+#define CARLOS_ROOT_MAX  128
+
 typedef struct BootInfo {
   uint64_t magic;
   uint32_t abi_version;     // start with 1
@@ -41,12 +44,19 @@ typedef struct BootInfo {
   uint32_t acpi_guid_kind;  // 1 = ACPI1.0 GUID, 2 = ACPI2.0 GUID
   uint8_t  rsdp_revision;   // 0 (v1), 2+ (v2+)
   uint8_t  _pad8[3];
+
+  // Carlos-specific extensions
+  char kernel_path[CARLOS_PATH_MAX]; // e.g. "\EFI\CARLOS\KERNEL.ELF"
+  char root_spec[CARLOS_ROOT_MAX];   // e.g. "partuuid=...." or "esp"
+
 } BootInfo;
 
-_Static_assert(sizeof(BootInfo) == 112, "BootInfo size changed");
+_Static_assert(sizeof(BootInfo) == 368, "BootInfo size changed");
 _Static_assert(sizeof(BootInfo) % 8 == 0, "BootInfo must be 8-byte aligned");
 
 // Layout guards (so you notice accidental edits immediately)
-_Static_assert(CARLOS_OFFSETOF(BootInfo, memmap)    == 32, "BootInfo layout changed");
-_Static_assert(CARLOS_OFFSETOF(BootInfo, fb_base)   == 64, "BootInfo layout changed");
-_Static_assert(CARLOS_OFFSETOF(BootInfo, acpi_rsdp) == 96, "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, memmap)      == 32,  "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, fb_base)     == 64,  "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, acpi_rsdp)   == 96,  "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, kernel_path) == 112, "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, root_spec)   == 240, "BootInfo layout changed");

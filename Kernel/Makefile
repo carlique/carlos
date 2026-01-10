@@ -1,107 +1,73 @@
-CC := clang
-LD := ld.lld
+# ---- Toolchain ----
+CC      := clang
+LD      := ld.lld
+TARGET  := x86_64-elf
 
-TARGET := x86_64-elf
+# ---- Paths ----
+BUILD   := build
+OUT     := $(BUILD)/kernel.elf
+LDSCRIPT:= linker.ld
+ESP_KERNEL := ../qemu/esp/EFI/CARLOS/KERNEL.ELF
 
-CFLAGS := -target $(TARGET) -std=c11 -O2 -g \
-          -ffreestanding -fno-stack-protector -fno-pic \
-          -mno-red-zone -mcmodel=kernel \
-          -Wall -Wextra -Werror \
-          -Iinclude
+# ---- Flags ----
+INCLUDES := -Iinclude -I../Common/include -Ithird_party/font8x8
 
-CFLAGS += -I../Common/include
-
-CFLAGS += -Ithird_party/font8x8
+CFLAGS  := -target $(TARGET) -std=c11 -O2 -g \
+           -ffreestanding -fno-stack-protector -fno-pic \
+           -mno-red-zone -mcmodel=kernel \
+           -Wall -Wextra -Werror \
+           $(INCLUDES)
 
 ASFLAGS := -target $(TARGET) -ffreestanding
+LDFLAGS := -T $(LDSCRIPT) -nostdlib
 
-LDFLAGS := -T linker.ld -nostdlib
+# ---- Sources ----
+SRCS_C := \
+  src/kmain.c src/pmm.c src/kmem.c src/uart.c src/shell.c src/str.c src/klog.c \
+  src/kbd.c src/fbcon.c src/kapi.c src/acpi.c src/idt.c src/isr.c src/gdt.c \
+  src/hpet.c src/time.c src/pci.c src/ahci.c \
+  src/fs.c src/fat16.c src/part.c src/disk.c src/disk_ahci.c \
+  src/mem.c src/ls.c src/part_gpt.c
 
-BUILD := build
-OUT := $(BUILD)/kernel.elf
-OBJ := $(BUILD)/entry.o $(BUILD)/kmain.o $(BUILD)/pmm.o $(BUILD)/kmem.o \
-       $(BUILD)/uart.o $(BUILD)/shell.o $(BUILD)/str.o $(BUILD)/klog.o \
-	   $(BUILD)/kbd.o $(BUILD)/fbcon.o $(BUILD)/kapi.o $(BUILD)/acpi.o \
-	   $(BUILD)/idt.o $(BUILD)/isr.o $(BUILD)/isr_s.o $(BUILD)/gdt.o \
-	   $(BUILD)/hpet.o $(BUILD)/time.o $(BUILD)/pci.o $(BUILD)/ahci.o
+# Only entry.S goes through the generic %.S -> %.o rule
+SRCS_S := src/entry.S
 
-all: $(OUT)
+OBJS_C := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS_C))
+OBJS_S := $(patsubst src/%.S,$(BUILD)/%.o,$(SRCS_S))
 
-$(BUILD):
-	mkdir -p $(BUILD)
+# Special-case isr.S to avoid clashing with isr.c
+OBJS   := $(OBJS_C) $(OBJS_S) $(BUILD)/isr_s.o
 
-$(BUILD)/ahci.o: src/ahci.c | $(BUILD)
+# ---- Generic compile rules ----
+$(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/pci.o: src/pci.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/%.o: src/%.S | $(BUILD)
+	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/hpet.o: src/hpet.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/time.o: src/time.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/gdt.o: src/gdt.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-	
-$(BUILD)/idt.o: src/idt.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/isr.o: src/isr.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
+# Special-case rule
 $(BUILD)/isr_s.o: src/isr.S | $(BUILD)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/acpi.o: src/acpi.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+# ---- Default target ----
+.PHONY: all
+all: $(OUT)
 
-$(BUILD)/kapi.o: src/kapi.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-	
-$(BUILD)/fbcon.o: src/fbcon.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+# ---- Build dir ----
+$(BUILD):
+	mkdir -p $(BUILD)
 
-$(BUILD)/kbd.o: src/kbd.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+# ---- Link ----
+$(OUT): $(OBJS) $(LDSCRIPT)
+	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
-$(BUILD)/klog.o: src/klog.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/uart.o: src/uart.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/shell.o: src/shell.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/str.o: src/str.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/pmm.o: src/pmm.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-	
-$(BUILD)/kmem.o: src/kmem.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/entry.o: src/entry.S | $(BUILD)
-	$(CC) $(ASFLAGS) -c $< -o $@
-
-$(BUILD)/kmain.o: src/kmain.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OUT): $(OBJ) linker.ld
-	$(LD) $(LDFLAGS) $(OBJ) -o $@
-
-clean:
-	rm -rf $(BUILD)
-
-.PHONY: all clean
-
-ESP_KERNEL := ../qemu/esp/EFI/CARLOS/KERNEL.ELF
-
+# ---- Install ----
+.PHONY: install
 install: $(OUT)
 	mkdir -p $(dir $(ESP_KERNEL))
 	cp $(OUT) $(ESP_KERNEL)
 
-all: $(OUT)
+# ---- Clean ----
+.PHONY: clean
+clean:
+	rm -rf $(BUILD)

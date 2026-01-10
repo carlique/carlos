@@ -10,6 +10,10 @@
 #include <carlos/gdt.h>
 #include <carlos/idt.h>
 #include <carlos/time.h>
+#include <carlos/disk.h>
+#include <carlos/part.h>
+#include <carlos/fat16.h>
+#include <carlos/fs.h>
 
 static BootInfo g_bi;              // kernel-owned copy
 static const BootInfo *g_bip = 0;  // pointer used by the rest of the kernel
@@ -29,62 +33,75 @@ void kmain(BootInfo* bi){
   idt_init();
   kprintf("IDT: OK\n");
 
-  kprintf("BI: magic=0x%llx layout=0x%llx bootinfo_phys=0x%llx\n",
-        bi->magic, bi->bootinfo_phys);
-  kprintf("FB: base=0x%llx size=0x%llx %ux%u ppsl=%u fmt=%u\n",
-        bi->fb_base, bi->fb_size, bi->fb_width, bi->fb_height, bi->fb_ppsl, bi->fb_format);
-
-  klog_enable_fb(bi);
-  kprintf("Framebuffer: %ux%u ppsl=%u fmt=%u base=%p\n",
-        bi->fb_width, bi->fb_height, bi->fb_ppsl, bi->fb_format,
-        phys_to_ptr(bi->fb_base));
-
-  // Validate BootInfo struct from bootloader 
-  // (important for stability/security)
-  // Check magic number
-  if (!bi || bi->magic != CARLOS_BOOTINFO_MAGIC) {
-    kprintf("BootInfo: BAD\n");
+  // ---- Validate BootInfo pointer + ABI first (do NOT deref bi before this) ----
+  if (!bi) {
+    kprintf("BootInfo: NULL\n");
     for(;;) __asm__ volatile ("hlt");
   }
 
-  // Check ABI version
+  if (bi->magic != CARLOS_BOOTINFO_MAGIC) {
+    kprintf("BootInfo: BAD magic=0x%llx\n", (unsigned long long)bi->magic);
+    for(;;) __asm__ volatile ("hlt");
+  }
+
   if (bi->abi_version != CARLOS_ABI_VERSION) {
-    kprintf("BootInfo: ABI version mismatch (kernel=%u bootloader=%u)\n",
+    kprintf("BootInfo: ABI mismatch (kernel=%u bootloader=%u)\n",
             CARLOS_ABI_VERSION, bi->abi_version);
     for(;;) __asm__ volatile ("hlt");
   }
 
-  // Check memory map info
   if (bi->memdesc_size == 0 ||
       bi->memmap == 0 || bi->memmap_size == 0 ||
       (bi->memmap_size % bi->memdesc_size) != 0) {
-    kprintf("BootInfo: bad memory map info\n");
+    kprintf("BootInfo: bad memory map info (memmap=0x%llx size=%llu desc=%llu)\n",
+            (unsigned long long)bi->memmap,
+            (unsigned long long)bi->memmap_size,
+            (unsigned long long)bi->memdesc_size);
     for(;;) __asm__ volatile ("hlt");
   }
 
-  extern unsigned char __kernel_start;
-  extern unsigned char __kernel_end;
-
-  // Copy once, then forget the original pointer
-  g_bi = *bi;
+  // ---- Snapshot BootInfo once; use g_bip everywhere else ----
+  g_bi  = *bi;
   g_bip = &g_bi;
 
   kprintf("BootInfo: OK\n");
+  kprintf("BI: magic=0x%llx bootinfo_phys=0x%llx\n",
+          (unsigned long long)g_bip->magic,
+          (unsigned long long)g_bip->bootinfo_phys);
+
+  kprintf("FB: base=0x%llx size=0x%llx %ux%u ppsl=%u fmt=%u\n",
+          (unsigned long long)g_bip->fb_base,
+          (unsigned long long)g_bip->fb_size,
+          g_bip->fb_width, g_bip->fb_height,
+          g_bip->fb_ppsl, g_bip->fb_format);
+
+  // enable FB logging only after BootInfo is trusted
+  klog_enable_fb(g_bip);
+  kprintf("Framebuffer: %ux%u ppsl=%u fmt=%u base=%p\n",
+          g_bip->fb_width, g_bip->fb_height,
+          g_bip->fb_ppsl, g_bip->fb_format,
+          phys_to_ptr(g_bip->fb_base));
+
+  extern unsigned char __kernel_start;
+  extern unsigned char __kernel_end;
   kprintf("Kernel range: %p - %p\n", &__kernel_start, &__kernel_end);
 
-  kprintf("BootInfo.bootinfo = %p\n", phys_to_cptr(g_bip->bootinfo_phys));
-  kprintf("BootInfo.memmap   = %p\n", phys_to_cptr(g_bip->memmap));
-  kprintf("BootInfo.memmap_size  = %llu\n", (unsigned long long)g_bip->memmap_size);
-  kprintf("BootInfo.memdesc_size = %llu\n", (unsigned long long)g_bip->memdesc_size);
-  kprintf("BootInfo.memdesc_ver  = %u\n", g_bip->memdesc_ver);
+  kprintf("BootInfo.bootinfo_phys = %p\n", phys_to_cptr(g_bip->bootinfo_phys));
+  kprintf("BootInfo.memmap        = %p\n", phys_to_cptr(g_bip->memmap));
+  kprintf("BootInfo.memmap_size   = %llu\n", (unsigned long long)g_bip->memmap_size);
+  kprintf("BootInfo.memdesc_size  = %llu\n", (unsigned long long)g_bip->memdesc_size);
+  kprintf("BootInfo.memdesc_ver   = %u\n", g_bip->memdesc_ver);
+
   acpi_probe(g_bip);
 
-  pci_init();
-  
-  time_init();
+  int rc = pci_init();
+  kprintf("PCI: init rc=%d\n", rc);
 
   pmm_init(g_bip);
   kprintf("PMM free pages = %llu\n", (unsigned long long)pmm_free_count());
+
+  rc = time_init();
+  kprintf("TIME: init rc=%d\n", rc);
 
   kmem_init();
 
@@ -99,6 +116,24 @@ void kmain(BootInfo* bi){
   for (int i = 0; i < 63; i++) buf[i] = 'A' + (i % 26);
   buf[63] = 0;
   kprintf("kmalloc ok: %p\n", buf);
+
+  static Fs fs;
+  rc = fs_mount_root(&fs, g_bip);
+  kprintf("FS: mount rc=%d\n", rc);
+
+  if (rc == 0) {
+    kprintf("FS: list /\n");
+    rc = fs_list_dir(&fs, "/");
+    kprintf("FS: list / rc=%d\n", rc);
+
+    kprintf("FS: list /EFI\n");
+    rc = fs_list_dir(&fs, "/EFI");
+    kprintf("FS: list /EFI rc=%d\n", rc);
+
+    kprintf("FS: list /EFI/CARLOS\n");
+    rc = fs_list_dir(&fs, "/EFI/CARLOS");
+    kprintf("FS: list /EFI/CARLOS rc=%d\n", rc);
+  }
 
   shell_run(g_bip);
 

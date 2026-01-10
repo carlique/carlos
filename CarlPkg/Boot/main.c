@@ -2,9 +2,16 @@
 
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
-#include <Library/BaseMemoryLib.h>        // CopyMem
-#include <Library/MemoryAllocationLib.h>  // FreePool
+#include <Library/BaseMemoryLib.h>        // CopyMem / ZeroMem
+#include <Library/MemoryAllocationLib.h>  // AllocatePool/FreePool (you already use FreePool)
+#include <Library/PrintLib.h>             // AsciiSPrint / AsciiStrCpyS
+#include <Library/BaseLib.h>              // (safe helper lib)
+
 #include <Protocol/GraphicsOutput.h>
+#include <Protocol/LoadedImage.h>
+#include <Guid/Gpt.h>
+#include <Protocol/PartitionInfo.h>
+
 #include <Guid/Acpi.h>
 
 #include <carlos/boot/bootinfo.h>
@@ -29,6 +36,77 @@ static void serial_putc_raw(char c){ while ((inb(COM1+5)&0x20)==0){} outb(COM1,(
 static void serial_puts_raw(const char *s){ for(;*s;s++){ if(*s=='\n') serial_putc_raw('\r'); serial_putc_raw(*s);} }
 
 typedef void (*KernelEntry)(BootInfo *bi);
+
+static VOID SetKernelPath(BootInfo *Bi) {
+  // BootInfo expects ASCII char[], keep it simple
+  AsciiStrCpyS(Bi->kernel_path, sizeof(Bi->kernel_path), "\\EFI\\CARLOS\\KERNEL.ELF");
+}
+
+static BOOLEAN FindGptPartGuidByName(CONST CHAR16 *Name, EFI_GUID *OutGuid) {
+  EFI_STATUS S;
+  EFI_HANDLE *Handles = NULL;
+  UINTN Count = 0;
+
+  S = gBS->LocateHandleBuffer(ByProtocol, &gEfiPartitionInfoProtocolGuid,
+                              NULL, &Count, &Handles);
+  if (EFI_ERROR(S) || !Handles || Count == 0) return FALSE;
+
+  for (UINTN i = 0; i < Count; i++) {
+    EFI_PARTITION_INFO_PROTOCOL *Pi = NULL;
+    S = gBS->HandleProtocol(Handles[i], &gEfiPartitionInfoProtocolGuid, (VOID**)&Pi);
+    if (EFI_ERROR(S) || !Pi) continue;
+
+    if (Pi->Type != PARTITION_TYPE_GPT) continue;
+
+    // GPT partition name lives in the GPT entry.
+    // In EDK2: Pi->Info.Gpt.PartitionName is CHAR16[36] (null-terminated).
+    if (Pi->Info.Gpt.PartitionName[0] == 0) continue;
+
+    if (StrCmp(Pi->Info.Gpt.PartitionName, Name) == 0) {
+      *OutGuid = Pi->Info.Gpt.UniquePartitionGUID;
+      FreePool(Handles);
+      return TRUE;
+    }
+  }
+
+  FreePool(Handles);
+  return FALSE;
+}
+
+static BOOLEAN GetPartGuidFromLoadedImageDevice(EFI_HANDLE ImageHandle, EFI_GUID *OutGuid) {
+  EFI_LOADED_IMAGE_PROTOCOL *Li = NULL;
+  EFI_PARTITION_INFO_PROTOCOL *Pi = NULL;
+
+  EFI_STATUS S = gBS->HandleProtocol(ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&Li);
+  if (EFI_ERROR(S) || !Li) return FALSE;
+
+  S = gBS->HandleProtocol(Li->DeviceHandle, &gEfiPartitionInfoProtocolGuid, (VOID**)&Pi);
+  if (EFI_ERROR(S) || !Pi) return FALSE;
+
+  if (Pi->Type != PARTITION_TYPE_GPT) return FALSE;
+
+  *OutGuid = Pi->Info.Gpt.UniquePartitionGUID;
+  return TRUE;
+}
+
+static VOID SetRootSpec(BootInfo *Bi, EFI_HANDLE ImageHandle) {
+  EFI_GUID Guid;
+
+  // Preferred: a dedicated root partition by label (works even if BOOT is on "superfloppy" FAT)
+  if (FindGptPartGuidByName(L"CARLOSROOT", &Guid)) {
+    AsciiSPrint(Bi->root_spec, sizeof(Bi->root_spec), "partuuid=%g", &Guid);
+    return;
+  }
+
+  // Fallback: if we booted from a GPT partition, use that partition
+  if (GetPartGuidFromLoadedImageDevice(ImageHandle, &Guid)) {
+    AsciiSPrint(Bi->root_spec, sizeof(Bi->root_spec), "partuuid=%g", &Guid);
+    return;
+  }
+
+  // Last resort
+  AsciiStrCpyS(Bi->root_spec, sizeof(Bi->root_spec), "esp");
+}
 
 EFI_STATUS
 EFIAPI
@@ -64,6 +142,12 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   // IMPORTANT: wipe the whole struct (pads + future fields)
   ZeroMem(Bi, sizeof(*Bi));
 
+  SetKernelPath(Bi);
+  SetRootSpec(Bi, ImageHandle);
+
+  Print(L"kernel_path=%a\n", Bi->kernel_path);
+  Print(L"root_spec=%a\n", Bi->root_spec);
+  
   Bi->magic = CARLOS_BOOTINFO_MAGIC;
   Bi->abi_version = 1;                 // or CARLOS_ABI_VERSION constant
   Bi->bootinfo_phys = (uint64_t)BiAddr; // physical address of BootInfo

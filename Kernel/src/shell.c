@@ -9,6 +9,12 @@
 #include <carlos/time.h>
 #include <carlos/pci.h>
 #include <carlos/ahci.h>
+#include <carlos/ls.h>
+
+#define SHELL_MAX_ARGS 8
+
+static Fs g_fs;
+static int g_fs_ready = 0;
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -23,6 +29,28 @@ static inline uint8_t inb(uint16_t port){
 static const char* skip_ws(const char *s){
   while (s && (*s == ' ' || *s == '\t')) s++;
   return s;
+}
+
+static int split_args(char *s, char **argv, int max_args){
+  int argc = 0;
+  if (!s || !argv || max_args <= 0) return 0;
+
+  s = (char*)skip_ws(s);
+  while (*s && argc < max_args) {
+    argv[argc++] = s;
+
+    // advance to end of token
+    while (*s && *s != ' ' && *s != '\t') s++;
+
+    // terminate token
+    if (*s == 0) break;
+    *s++ = 0;
+
+    // skip whitespace to next token
+    s = (char*)skip_ws(s);
+  }
+
+  return argc;
 }
 
 static uint64_t parse_u64(const char *s){
@@ -268,25 +296,16 @@ static void cmd_ahci_read(const char *arg){
 static void run_cmd(char *line){
   if (!line) return;
 
-  // Trim leading whitespace
-  char *cmd = line;
-  while (*cmd == ' ' || *cmd == '\t') cmd++;
+  // Build argc/argv from the line (in-place)
+  char *argv[SHELL_MAX_ARGS];
+  int argc = split_args(line, argv, SHELL_MAX_ARGS);
 
-  // If empty line, nothing to do
-  if (*cmd == 0) return;
+  if (argc == 0) return;
 
-  // Split into cmd + arg (in-place)
-  char *arg = 0;
-  for (char *q = cmd; *q; q++){
-    if (*q == ' ' || *q == '\t'){
-      *q = 0;                 // terminate command token
-      arg = q + 1;            // argument string (may have leading ws)
-      break;
-    }
-  }
-  if (arg) arg = (char*)skip_ws(arg);
+  char *cmd = argv[0];
+  char *arg = (argc >= 2) ? argv[1] : 0;
 
-  // Dispatch (always return after handling)
+  // Dispatch
   if (kstreq(cmd, "help"))   { cmd_help();   return; }
   if (kstreq(cmd, "mem"))    { cmd_mem();    return; }
   if (kstreq(cmd, "alloc"))  { cmd_alloc();  return; }
@@ -298,10 +317,18 @@ static void run_cmd(char *line){
   if (kstreq(cmd, "time"))   { cmd_time();   return; }
   if (kstreq(cmd, "sleep"))  { cmd_sleep(arg); return; }
 
-  if (kstreq(cmd, "lspci")) { cmd_lspci(); return; }
+  if (kstreq(cmd, "lspci"))   { cmd_lspci(); return; }
   if (kstreq(cmd, "pcidump")) { cmd_pcidump(arg); return; }
-  if (kstreq(cmd, "ahci")) { cmd_ahci(arg); return; }
+  if (kstreq(cmd, "ahci"))    { cmd_ahci(arg); return; }
   if (kstreq(cmd, "ahci_read")) { cmd_ahci_read(arg); return; }
+
+  if (kstreq(cmd, "ls")) {
+    if (!g_fs_ready) { kprintf("ls: fs not mounted\n"); return; }
+    // linux-style applet signature
+    // (ls itself decides default path if argc==1)
+    (void)ls_main(&g_fs, argc, argv);
+    return;
+  }
 
   kputs("unknown: ");
   kputs(cmd);
@@ -311,6 +338,12 @@ static void run_cmd(char *line){
 void shell_run(const BootInfo *bi){
   
   (void)bi;
+
+  if (!g_fs_ready) {
+    int rc = fs_mount_esp(&g_fs);
+    kprintf("FS: mount rc=%d\n", rc);
+    g_fs_ready = (rc == 0);
+  }
 
   kputs("Carlos shell ready. Type 'help'.\n");
   prompt();
