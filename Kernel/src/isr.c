@@ -1,30 +1,45 @@
+#include <stdint.h>
 #include <carlos/isr.h>
 #include <carlos/klog.h>
 
-void isr_common_handler(IsrFrame *f){
-  kprintf("\n=== EXCEPTION ===\n");
-  kprintf("vec=%llu err=%llu\n", f->vector, f->error);
-  kprintf("rip=%p cs=%p rflags=%p\n",
-          (void*)f->rip, (void*)f->cs, (void*)f->rflags);
+static volatile int g_panic = 0;
 
-  if (f->vector == 14) {
-    uint64_t cr2;
-    __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
-    kprintf("pagefault cr2=%p\n", (void*)cr2);
+static inline uint64_t rd_cr2(void){
+  uint64_t v;
+  __asm__ volatile ("mov %%cr2, %0" : "=r"(v));
+  return v;
+}
+
+static void halt_forever(void){
+  __asm__ volatile ("cli");
+  for (;;) __asm__ volatile ("hlt");
+}
+
+void isr_common_handler(IsrFrame *f)
+{
+  if (__atomic_exchange_n(&g_panic, 1, __ATOMIC_SEQ_CST)) {
+    // if we re-enter, just return (don’t deadlock the system)
+    return;
   }
 
+  __asm__ volatile ("cli");
+
+  kprintf("\n=== EXC %llu ===\n", f->vector);
+  kprintf("err=0x%llx rip=0x%llx cs=0x%llx rflags=0x%llx\n",
+          f->error, f->rip, f->cs, f->rflags);
+
   if (f->vector == 14) {
-    uint64_t cr2;
-    __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
-
-    kprintf("pagefault cr2=%p err=", (void*)cr2);
-    kprintf("%llu\n", f->error);
-
-    // Optional: decode common bits
-    // bit0 P: 0=not-present,1=protection
-    // bit1 W/R: 1=write
-    // bit2 U/S: 1=user
-    // bit3 RSVD
-    // bit4 I/D instruction fetch
+    uint64_t cr2 = rd_cr2();
+    kprintf("cr2=0x%llx\n", cr2);
   }
+
+   // For TESTING: allow returning from “safe-ish” traps
+  if (f->vector == 3 || f->vector == 6) {
+    kprintf("ISR: returning from vector %llu\n", f->vector);
+    __asm__ volatile ("sti");
+    return;
+  }
+
+  kprintf("HALT.\n");
+  halt_forever();
 }

@@ -23,10 +23,6 @@ void kmain(BootInfo* bi){
   kprintf("CarlKernel: hello from kernel!\n");
   kprintf("KERNEL BUILD: %s %s\n", __DATE__, __TIME__);
 
-  extern void hexdump_128(const void *p); // write a tiny version of your hexdump_512
-  kprintf("bi ptr=%p\n", bi);
-  hexdump_128(bi);
-
   gdt_init();
   kprintf("GDT/TSS: OK\n");
 
