@@ -71,6 +71,6 @@ typedef struct {
   uint64_t LapicAddress;
 } AcpiMadtLapicAddrOverride;
 
-const void* acpi_find_sdt(const char sig4[4]);
+const AcpiSdtHeader* acpi_find_sdt(const char sig4[4]);
 
 #pragma pack(pop)

@@ -97,17 +97,17 @@ static const char* ahci_sig_name(uint32_t sig){
 }
 
 static void ahci_dump_ports(uint64_t hba){
-  uint32_t pi = mmio_read32(hba + AHCI_PI);
+  uint32_t pi = mmio_read32_phys(hba + AHCI_PI);
 
   for (uint32_t p = 0; p < 32; p++){
     if (((pi >> p) & 1u) == 0) continue;
 
     uint64_t pr = hba + AHCI_PORTS + (uint64_t)p * AHCI_PORT_SZ;
 
-    uint32_t ssts = mmio_read32(pr + P_SSTS);
-    uint32_t sig  = mmio_read32(pr + P_SIG);
-    uint32_t tfd  = mmio_read32(pr + P_TFD);
-    uint32_t serr = mmio_read32(pr + P_SERR);
+    uint32_t ssts = mmio_read32_phys(pr + P_SSTS);
+    uint32_t sig  = mmio_read32_phys(pr + P_SIG);
+    uint32_t tfd  = mmio_read32_phys(pr + P_TFD);
+    uint32_t serr = mmio_read32_phys(pr + P_SERR);
 
     uint32_t det = (ssts >> 0) & 0xF;
     uint32_t ipm = (ssts >> 8) & 0xF;
@@ -129,25 +129,25 @@ static void ahci_dump_ports(uint64_t hba){
 }
 
 static void ahci_port_stop(uint64_t pr){
-  uint32_t cmd = mmio_read32(pr + P_CMD);
+  uint32_t cmd =  mmio_read32_phys(pr + P_CMD);
 
   // Clear ST (start) and FRE (FIS receive enable)
   cmd &= ~(1u<<0);   // ST
   cmd &= ~(1u<<4);   // FRE
-  mmio_write32(pr + P_CMD, cmd);
+  mmio_write32_phys(pr + P_CMD, cmd);
 
   // Wait until FR and CR clear
   for (int i=0; i<1000000; i++){
-    uint32_t c = mmio_read32(pr + P_CMD);
+    uint32_t c = mmio_read32_phys(pr + P_CMD);
     if (((c >> 14) & 1u) == 0 && ((c >> 15) & 1u) == 0) break; // FR, CR
   }
 }
 
 static void ahci_port_start(uint64_t pr){
-  uint32_t cmd = mmio_read32(pr + P_CMD);
+  uint32_t cmd =  mmio_read32_phys(pr + P_CMD);
   cmd |= (1u<<4);  // FRE
   cmd |= (1u<<0);  // ST
-  mmio_write32(pr + P_CMD, cmd);
+  mmio_write32_phys(pr + P_CMD, cmd);
 }
 
 static int ahci_port_init(uint32_t port){
@@ -158,7 +158,7 @@ static int ahci_port_init(uint32_t port){
   uint64_t pr  = hba + AHCI_PORTS + (uint64_t)port * AHCI_PORT_SZ;
 
   // Only init if device present
-  uint32_t ssts = mmio_read32(pr + P_SSTS);
+  uint32_t ssts = mmio_read32_phys(pr + P_SSTS);
   uint32_t det = (ssts >> 0) & 0xF;
   uint32_t ipm = (ssts >> 8) & 0xF;
   if (!(det == 3 && ipm == 1)) return -3;
@@ -184,10 +184,10 @@ static int ahci_port_init(uint32_t port){
   uint64_t clb_phys = (uint64_t)(uintptr_t)ps->clb;
   uint64_t fb_phys  = (uint64_t)(uintptr_t)ps->fb;
 
-  mmio_write32(pr + 0x00, (uint32_t)(clb_phys & 0xFFFFFFFF)); // PxCLB
-  mmio_write32(pr + 0x04, (uint32_t)(clb_phys >> 32));        // PxCLBU
-  mmio_write32(pr + 0x08, (uint32_t)(fb_phys & 0xFFFFFFFF));  // PxFB
-  mmio_write32(pr + 0x0C, (uint32_t)(fb_phys >> 32));         // PxFBU
+  mmio_write32_phys(pr + 0x00, (uint32_t)(clb_phys & 0xFFFFFFFF)); // PxCLB
+  mmio_write32_phys(pr + 0x04, (uint32_t)(clb_phys >> 32));        // PxCLBU
+  mmio_write32_phys(pr + 0x08, (uint32_t)(fb_phys & 0xFFFFFFFF));  // PxFB
+  mmio_write32_phys(pr + 0x0C, (uint32_t)(fb_phys >> 32));         // PxFBU
 
   // Setup command header slot 0 to point to our command table
   HbaCmdHdr *cl = (HbaCmdHdr*)ps->clb;
@@ -200,8 +200,8 @@ static int ahci_port_init(uint32_t port){
   cl[0].ctbau = (uint32_t)(ct_phys >> 32);
 
   // Clear errors
-  mmio_write32(pr + P_SERR, 0xFFFFFFFF);
-  mmio_write32(pr + P_IS,   0xFFFFFFFF);
+  mmio_write32_phys(pr + P_SERR, 0xFFFFFFFF);
+  mmio_write32_phys(pr + P_IS,   0xFFFFFFFF);
 
   // Start port
   ahci_port_start(pr);
@@ -233,19 +233,19 @@ int ahci_probe_bdf(uint8_t b, uint8_t d, uint8_t f){
   abar = bar5;
   uint64_t hba = (uint64_t)(uintptr_t)iomap(abar, 0x2000, 0);
 
-  uint32_t cap  = mmio_read32(hba + AHCI_CAP);
-  uint32_t ghc  = mmio_read32(hba + AHCI_GHC);
-  uint32_t vs   = mmio_read32(hba + AHCI_VS);
-  uint32_t cap2 = mmio_read32(hba + AHCI_CAP2);
-  uint32_t pi   = mmio_read32(hba + AHCI_PI);
+  uint32_t cap  = mmio_read32_phys(hba + AHCI_CAP);
+  uint32_t ghc  = mmio_read32_phys(hba + AHCI_GHC);
+  uint32_t vs   = mmio_read32_phys(hba + AHCI_VS);
+  uint32_t cap2 = mmio_read32_phys(hba + AHCI_CAP2);
+  uint32_t pi   = mmio_read32_phys(hba + AHCI_PI);
 
   // Enable AHCI mode if not enabled (AE = bit31)
   if ((ghc & (1u<<31)) == 0){
-    mmio_write32(hba + AHCI_GHC, ghc | (1u<<31));
-    ghc = mmio_read32(hba + AHCI_GHC);
+    mmio_write32_phys(hba + AHCI_GHC, ghc | (1u<<31));
+    ghc = mmio_read32_phys(hba + AHCI_GHC);
   }
 
-  kprintf("AHCI: bdf=%u:%u.%u ABAR=%p\n", b,d,f, (void*)(uintptr_t)abar);
+  kprintf("AHCI: bdf=%u:%u.%u ABAR=%p\n", b,d,f, phys_to_cptr(abar));
   kprintf("AHCI: CAP=0x%x CAP2=0x%x GHC=0x%x VS=0x%x PI=0x%x\n", cap, cap2, ghc, vs, pi);
 
   ahci_dump_ports(hba);
@@ -308,7 +308,7 @@ int ahci_read(uint32_t port, uint64_t lba, uint32_t count, void *buf){
 
   // Wait while busy
   for (int i=0; i<1000000; i++){
-    uint32_t tfd = mmio_read32(pr + P_TFD);
+    uint32_t tfd = mmio_read32_phys(pr + P_TFD);
     if ((tfd & (1u<<7)) == 0 && (tfd & (1u<<3)) == 0) break; // BSY=7, DRQ=3
   }
 
@@ -352,21 +352,21 @@ int ahci_read(uint32_t port, uint64_t lba, uint32_t count, void *buf){
   cl[0].prdtl = 1;
 
   // Clear interrupts + errors
-  mmio_write32(pr + P_IS, 0xFFFFFFFF);
-  mmio_write32(pr + P_SERR, 0xFFFFFFFF);
+  mmio_write32_phys(pr + P_IS, 0xFFFFFFFF);
+  mmio_write32_phys(pr + P_SERR, 0xFFFFFFFF);
 
   // Issue command in slot 0 by setting PxCI bit0
-  mmio_write32(pr + P_CI, 1u);
+  mmio_write32_phys(pr + P_CI, 1u);
 
   // Poll for completion
   for (int i=0; i<5000000; i++){
-    uint32_t ci = mmio_read32(pr + P_CI);
+    uint32_t ci = mmio_read32_phys(pr + P_CI);
     if ((ci & 1u) == 0) break;
   }
 
   // Check errors
-  uint32_t is = mmio_read32(pr + P_IS);
-  uint32_t tfd = mmio_read32(pr + P_TFD);
+  uint32_t is = mmio_read32_phys(pr + P_IS);
+  uint32_t tfd = mmio_read32_phys(pr + P_TFD);
   if (is & (1u<<30)) { // TFES
     kprintf("AHCI: read error TFES, IS=0x%x TFD=0x%x\n", is, tfd);
     return -10;

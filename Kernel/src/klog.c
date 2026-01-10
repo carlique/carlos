@@ -3,13 +3,15 @@
 #include <carlos/klog.h>
 #include <carlos/uart.h>
 #include <carlos/fbcon.h>
-#include <carlos/bootinfo.h>
+#include <carlos/boot/bootinfo.h>
+#include <carlos/phys.h>
 
 static int fb_enabled = 0;
 
 void klog_enable_fb(const BootInfo *bi) {
   if (!bi || bi->fb_base == 0) return;
-  fbcon_init(bi->fb_base, bi->fb_size, bi->fb_width, bi->fb_height, bi->fb_ppsl, bi->fb_format);
+  fbcon_init(bi->fb_base, bi->fb_size, 
+            bi->fb_width, bi->fb_height, bi->fb_ppsl, bi->fb_format);
   fb_enabled = 1;
 }
 

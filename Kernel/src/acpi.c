@@ -1,7 +1,8 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <carlos/phys.h>
 #include <carlos/acpi.h>
-#include <carlos/bootinfo.h>
+#include <carlos/boot/bootinfo.h>
 #include <carlos/klog.h>
 
 static const AcpiSdtHeader *g_rsdt = 0;
@@ -87,9 +88,8 @@ static void madt_dump(const AcpiMadt *madt){
       }
       case 5: {
         const AcpiMadtLapicAddrOverride *e = (const AcpiMadtLapicAddrOverride*)p;
-        kprintf("  MADT: LAPIC_ADDR_OVERRIDE = %p\n",
-                (void*)(uintptr_t)e->LapicAddress);
-        break;
+        kprintf("  MADT: LAPIC_ADDR_OVERRIDE = 0x%llx\n", (uint64_t)e->LapicAddress);
+        break;  
       }
       default:
         kprintf("  MADT: type=%u len=%u (ignored)\n", h->Type, h->Length);
@@ -100,18 +100,18 @@ static void madt_dump(const AcpiMadt *madt){
   }
 }
 
-const void* acpi_find_sdt(const char sig4[4]){
+const AcpiSdtHeader* acpi_find_sdt(const char sig4[4]){
   if (!g_rsdt || !g_rsdt_ent || g_rsdt_count == 0) return 0;
 
   for (uint32_t i = 0; i < g_rsdt_count; i++) {
     uint64_t phys = (uint64_t)g_rsdt_ent[i];
-    const AcpiSdtHeader *h = (const AcpiSdtHeader*)(uintptr_t)phys;
+    const AcpiSdtHeader *h = phys_to_cptr(phys);
 
     if (sig4_eq(h->Signature, sig4)) {
       // Optional safety: basic length + checksum
-      if (h->Length < sizeof(AcpiSdtHeader)) return 0;
-      if (!checksum_ok(h, h->Length)) return 0;
-      return (const void*)h;
+      if (h->Length < sizeof(AcpiSdtHeader)) continue;
+      if (!checksum_ok(h, h->Length)) continue;
+      return h;
     }
   }
 
@@ -124,12 +124,10 @@ void acpi_probe(const BootInfo *bi){
     return;
   }
 
-  const AcpiRsdpV1 *rsdp = (const AcpiRsdpV1*)(uintptr_t)bi->acpi_rsdp;
+  const AcpiRsdpV1 *rsdp = phys_to_cptr(bi->acpi_rsdp);
 
-  kprintf("ACPI: RSDP=%p guid_kind=%u rsdp_rev=%u\n",
-          (void*)(uintptr_t)bi->acpi_rsdp,
-          bi->acpi_guid_kind,
-          rsdp->Revision);
+  kprintf("ACPI: RSDP=0x%llx guid_kind=%u rsdp_rev=%u\n",
+        bi->acpi_rsdp, bi->acpi_guid_kind, rsdp->Revision);
 
   if (!sig8_eq(rsdp->Signature, "RSD PTR ")){
     kprintf("ACPI: bad RSDP signature\n");
@@ -147,9 +145,9 @@ void acpi_probe(const BootInfo *bi){
     return;
   }
 
-  const AcpiSdtHeader *rsdt = (const AcpiSdtHeader*)(uintptr_t)(uint64_t)rsdp->RsdtAddress;
+  const AcpiSdtHeader *rsdt = phys_to_cptr(rsdp->RsdtAddress);
 
-  kprintf("ACPI: RSDT @ %p\n", (void*)(uintptr_t)(uint64_t)rsdp->RsdtAddress);
+  kprintf("ACPI: RSDT @ 0x%llx\n", (uint64_t)rsdp->RsdtAddress);
 
   if (!sig4_eq(rsdt->Signature, "RSDT")){
     kprintf("ACPI: RSDT sig mismatch: ");
@@ -181,13 +179,13 @@ void acpi_probe(const BootInfo *bi){
 
   for (uint32_t i=0;i<entry_count;i++){
     uint64_t phys = (uint64_t)ent[i];
-    const AcpiSdtHeader *h = (const AcpiSdtHeader*)(uintptr_t)phys;
+    const AcpiSdtHeader *h = phys_to_cptr(phys);
 
     kprintf("ACPI: [");
     kprintf("%u", i);
     kprintf("] ");
     print_sig4(h->Signature);
-    kprintf(" @ %p len=%u\n", (void*)(uintptr_t)phys, h->Length);
+    kprintf(" @ 0x%llx len=%u\n", phys, h->Length);
 
     if (sig4_eq(h->Signature, "APIC")){
       madt = (const AcpiMadt*)h;

@@ -1,7 +1,7 @@
 #pragma once
 #include <stdarg.h>
 #include <stddef.h>
-#include <carlos/bootinfo.h>
+#include <carlos/boot/bootinfo.h>
 
 void klog_enable_fb(const BootInfo *bi);
 

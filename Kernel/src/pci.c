@@ -2,6 +2,7 @@
 #include <carlos/klog.h>
 #include <carlos/acpi.h>
 #include <carlos/pci.h>
+#include <carlos/phys.h>
 
 // MCFG table (ACPI "MCFG") describes PCI Express ECAM windows.
 typedef struct __attribute__((packed)) {
@@ -23,18 +24,20 @@ static uint8_t  g_bus_start = 0;
 static uint8_t  g_bus_end   = 0;
 static uint16_t g_seg       = 0;
 
-static inline uint32_t mmio_read32(uint64_t addr){
-  return *(volatile uint32_t*)(uintptr_t)addr;
+static inline uint32_t mmio_read32_phys(uint64_t phys){
+  volatile uint32_t *p = (volatile uint32_t*)phys_to_ptr(phys);
+  return *p;
 }
 
 static uint32_t pci_cfg_read32(uint8_t bus, uint8_t dev, uint8_t fun, uint16_t off){
   // ECAM: base + bus*1MB + dev*32KB + fun*4KB + off
-  uint64_t addr = g_ecam_base
+  uint64_t phys = g_ecam_base
     + ((uint64_t)bus << 20)
     + ((uint64_t)dev << 15)
     + ((uint64_t)fun << 12)
     + (uint64_t)(off & 0xFFC);
-  return mmio_read32(addr);
+
+  return mmio_read32_phys(phys);
 }
 
 static uint16_t pci_cfg_read16(uint8_t bus, uint8_t dev, uint8_t fun, uint16_t off){
@@ -69,14 +72,13 @@ int pci_init(void){
   kprintf("PCI: MCFG entries=%u\n", n);
   if (n == 0) return -3;
 
-  // For now: pick the first allocation entry
   g_ecam_base = a[0].BaseAddress;
   g_seg       = a[0].PciSegment;
   g_bus_start = a[0].StartBus;
   g_bus_end   = a[0].EndBus;
 
-  kprintf("PCI: ECAM base=%p seg=%u buses=%u..%u\n",
-          (void*)(uintptr_t)g_ecam_base, g_seg, g_bus_start, g_bus_end);
+  kprintf("PCI: ECAM base=0x%llx seg=%u buses=%u..%u\n",
+          g_ecam_base, g_seg, g_bus_start, g_bus_end);
 
   return 0;
 }
@@ -113,7 +115,7 @@ void pci_list(void){
         if (fun == 0 && ((header_type & 0x80) == 0)) break;
       }
     }
-    }
+  }
 }
 
 int pci_dump_bdf(uint8_t bus, uint8_t dev, uint8_t fun){
@@ -168,10 +170,10 @@ if ((header_type & 0x7F) == 0x00) {
         // 64-bit BAR uses next BAR as high dword
         uint32_t bar_hi = pci_cfg_read32(bus, dev, fun, (uint16_t)(off + 4));
         addr |= ((uint64_t)bar_hi << 32);
-        kprintf("  BAR%d: MMIO64 addr=%p\n", (uint32_t)i, (void*)(uintptr_t)addr);
+        kprintf("  BAR%d: MMIO64 addr=0x%llx\n", (uint32_t)i, addr);
         i++; // consumed next BAR
         } else {
-        kprintf("  BAR%d: MMIO32 addr=%p\n", (uint32_t)i, (void*)(uintptr_t)addr);
+        kprintf("  BAR%d: MMIO32 addr=0x%llx\n", (uint32_t)i, addr);
         }
     }
     }

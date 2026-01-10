@@ -43,10 +43,10 @@ typedef struct BootInfo {
   uint8_t  _pad8[3];
 } BootInfo;
 
-_Static_assert(sizeof(BootInfo) == 108, "BootInfo size changed");
+_Static_assert(sizeof(BootInfo) == 112, "BootInfo size changed");
 _Static_assert(sizeof(BootInfo) % 8 == 0, "BootInfo must be 8-byte aligned");
 
 // Layout guards (so you notice accidental edits immediately)
-_Static_assert(CARLOS_OFFSETOF(BootInfo, memmap)    == 28, "BootInfo layout changed");
-_Static_assert(CARLOS_OFFSETOF(BootInfo, fb_base)   == 60, "BootInfo layout changed");
-_Static_assert(CARLOS_OFFSETOF(BootInfo, acpi_rsdp) == 92, "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, memmap)    == 32, "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, fb_base)   == 64, "BootInfo layout changed");
+_Static_assert(CARLOS_OFFSETOF(BootInfo, acpi_rsdp) == 96, "BootInfo layout changed");

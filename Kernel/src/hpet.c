@@ -1,20 +1,8 @@
 #include <stdint.h>
 #include <carlos/hpet.h>
 #include <carlos/klog.h>
+#include <carlos/phys.h>
 #include <carlos/acpi.h>   // we’ll add/find acpi_find_sdt("HPET")
-
-// ACPI SDT header (common)
-typedef struct __attribute__((packed)) {
-  char     Sig[4];
-  uint32_t Length;
-  uint8_t  Revision;
-  uint8_t  Checksum;
-  char     OemId[6];
-  char     OemTableId[8];
-  uint32_t OemRevision;
-  uint32_t CreatorId;
-  uint32_t CreatorRevision;
-} AcpiSdtHdr;
 
 // Generic Address Structure (GAS)
 typedef struct __attribute__((packed)) {
@@ -27,7 +15,7 @@ typedef struct __attribute__((packed)) {
 
 // HPET table
 typedef struct __attribute__((packed)) {
-  AcpiSdtHdr Hdr;
+  AcpiSdtHeader Hdr;
   uint32_t   EventTimerBlockId;
   AcpiGas    BaseAddress;
   uint8_t    HpetNumber;
@@ -46,12 +34,13 @@ typedef struct __attribute__((packed)) {
   volatile uint64_t MAIN;      // 0xF0
 } HpetRegs;
 
-static HpetRegs *g_hpet = 0;
+static volatile HpetRegs *g_hpet = 0;   // mapped pointer (via phys_to_ptr for now)
+static uint64_t  g_hpet_phys = 0;        // physical base
 static uint64_t  g_fs_per_tick = 0; // femtoseconds per tick
 static uint64_t  g_hz = 0;          // HPET frequency (ticks per second)
 
-
 static inline uint64_t rd_main(void){
+  if (!g_hpet) return 0;
   return g_hpet->MAIN;
 }
 
@@ -67,8 +56,11 @@ int hpet_init_from_acpi(void){
     return -2;
   }
 
+  if (t->BaseAddress.Address == 0) return -5;
+
   uint64_t base = t->BaseAddress.Address;
-  g_hpet = (HpetRegs*)(uintptr_t)base;
+  g_hpet_phys = base;
+  g_hpet = (volatile HpetRegs*)phys_to_ptr(base);
 
   uint64_t cap = g_hpet->GCAP_ID;
   g_fs_per_tick = (cap >> 32); // HPET period in femtoseconds
@@ -90,15 +82,17 @@ int hpet_init_from_acpi(void){
   g_hpet->MAIN  = 0;
   g_hpet->GCONF = 1;
 
-  kprintf("HPET: base=%p fs/tick=%llu hz=%llu\n",
-          (void*)base, g_fs_per_tick, g_hz);
+  kprintf("HPET: base=0x%llx fs/tick=%llu hz=%llu\n", 
+          g_hpet_phys, g_fs_per_tick, g_hz);
   return 0;
 }
 
 uint64_t hpet_now_ns(void){
+  if (!g_hpet || g_hz == 0) return 0;
+
   // ns = ticks * 1e9 / hz
   uint64_t ticks = rd_main();
-
+  
   // Avoid overflow: split ticks into quotient+remainder
   uint64_t q = ticks / g_hz;
   uint64_t r = ticks % g_hz;

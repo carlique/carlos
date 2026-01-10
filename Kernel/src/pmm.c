@@ -1,13 +1,12 @@
 #include <stdint.h>
-#include <carlos/bootinfo.h>
+#include <carlos/boot/bootinfo.h>
+#include <carlos/phys.h>
 #include <carlos/pmm.h>
 
 extern uint8_t __kernel_start;
 extern uint8_t __kernel_end;
 
 #define PAGE_SIZE 4096ULL
-
-// UEFI memory type values (we only care about Conventional=7)
 #define EfiConventionalMemory 7
 
 typedef struct {
@@ -19,38 +18,26 @@ typedef struct {
   uint64_t Attribute;
 } EfiMemoryDescriptor;
 
-// A simple stack of free pages.
-// Adjust this if you want to support very large RAM.
-// 131072 * 8 = 1 MiB metadata
 #define MAX_FREE_PAGES (131072)
-
 static uint64_t g_free_pages[MAX_FREE_PAGES];
 static uint64_t g_free_top = 0;
 
-static inline uint64_t align_up(uint64_t x, uint64_t a) {
-  return (x + a - 1) & ~(a - 1);
-}
-static inline uint64_t align_down(uint64_t x, uint64_t a) {
-  return x & ~(a - 1);
+static inline uint64_t align_down(uint64_t x) { return x & ~(PAGE_SIZE - 1); }
+static inline uint64_t align_up(uint64_t x)   { return (x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1); }
+
+static inline int in_range(uint64_t x, uint64_t lo, uint64_t hi) {
+  return (x >= lo) && (x < hi); // [lo, hi)
 }
 
-// returns 1 if [p, p+PAGE_SIZE) intersects [a, b)
-static int page_intersects(uint64_t p, uint64_t a, uint64_t b) {
-  uint64_t pe = p + PAGE_SIZE;
-  return !(pe <= a || p >= b);
-}
-
-static int is_reserved(uint64_t page_addr,
-                       uint64_t k_start, uint64_t k_end,
-                       uint64_t mm_start, uint64_t mm_end,
-                       uint64_t bi_addr)
+static inline int is_reserved_page(uint64_t page_phys,
+                                  uint64_t kernel_lo, uint64_t kernel_hi,
+                                  uint64_t memmap_lo, uint64_t memmap_hi,
+                                  uint64_t bi_lo, uint64_t bi_hi)
 {
-  // reserve kernel image range
-  if (page_intersects(page_addr, k_start, k_end)) return 1;
-  // reserve memmap snapshot range
-  if (page_intersects(page_addr, mm_start, mm_end)) return 1;
-  // reserve BootInfo page (bi_addr is one page)
-  if (page_addr == (bi_addr & ~(PAGE_SIZE - 1))) return 1;
+  // page_phys is page-aligned
+  if (in_range(page_phys, kernel_lo, kernel_hi)) return 1;
+  if (in_range(page_phys, memmap_lo, memmap_hi)) return 1;
+  if (in_range(page_phys, bi_lo, bi_hi)) return 1;
   return 0;
 }
 
@@ -59,28 +46,31 @@ void pmm_init(const BootInfo *bi)
   g_free_top = 0;
   if (!bi || bi->magic != CARLOS_BOOTINFO_MAGIC) return;
 
-  // These are true “physical” addresses at this stage (identity mapping assumption)
-  uint64_t mm_base = bi->memmap;
-  uint64_t mm_size = bi->memmap_size;
-  uint64_t desc_sz = bi->memdesc_size;
+  const uint64_t mm_base = bi->memmap;
+  const uint64_t mm_size = bi->memmap_size;
+  const uint64_t desc_sz = bi->memdesc_size;
 
-  // Reserve ranges:
-  uint64_t kernel_start = (uint64_t)(uintptr_t)&__kernel_start;
-  uint64_t kernel_end   = (uint64_t)(uintptr_t)&__kernel_end;
-  kernel_start = align_down(kernel_start, PAGE_SIZE);
-  kernel_end   = align_up(kernel_end, PAGE_SIZE);
+  if (!mm_base || !mm_size || !desc_sz) return;
 
-  uint64_t memmap_start = align_down(mm_base, PAGE_SIZE);
-  uint64_t memmap_end   = align_up(mm_base + mm_size, PAGE_SIZE);
+  // Reserve kernel image
+  uint64_t kernel_lo = align_down((uint64_t)(uintptr_t)&__kernel_start);
+  uint64_t kernel_hi = align_up  ((uint64_t)(uintptr_t)&__kernel_end);
 
-  // BootInfo struct location
-  uint64_t bootinfo_page = (uint64_t)bi->bootinfo;
+  // Reserve copied UEFI memmap snapshot buffer
+  uint64_t memmap_lo = align_down(mm_base);
+  uint64_t memmap_hi = align_up(mm_base + mm_size);
 
-  uint64_t count = (desc_sz == 0) ? 0 : (mm_size / desc_sz);
-  const uint8_t *p = (const uint8_t *)(uintptr_t)mm_base;
+  // Reserve BootInfo page (loader allocated 1 page)
+  uint64_t bi_phys = bi->bootinfo_phys ? bi->bootinfo_phys : (uint64_t)(uintptr_t)bi;
+  uint64_t bi_lo = align_down(bi_phys);
+  uint64_t bi_hi = bi_lo + PAGE_SIZE;
+
+  const uint64_t count = mm_size / desc_sz;
+  const uint8_t *p = (const uint8_t*)phys_to_cptr(mm_base);
 
   for (uint64_t i = 0; i < count; i++) {
-    const EfiMemoryDescriptor *d = (const EfiMemoryDescriptor *)(const void *)(p + i * desc_sz);
+    const EfiMemoryDescriptor *d =
+      (const EfiMemoryDescriptor *)(const void *)(p + i * desc_sz);
 
     if (d->Type != EfiConventionalMemory) continue;
 
@@ -88,33 +78,31 @@ void pmm_init(const BootInfo *bi)
     uint64_t pages = d->NumberOfPages;
 
     for (uint64_t pg = 0; pg < pages; pg++) {
-      uint64_t addr = start + pg * PAGE_SIZE;
+      uint64_t page_phys = align_down(start + pg * PAGE_SIZE);
 
-      if (is_reserved(addr, kernel_start, kernel_end, memmap_start, memmap_end, bootinfo_page))
+      if (is_reserved_page(page_phys, kernel_lo, kernel_hi, memmap_lo, memmap_hi, bi_lo, bi_hi))
         continue;
 
       if (g_free_top < MAX_FREE_PAGES) {
-        g_free_pages[g_free_top++] = addr;
+        g_free_pages[g_free_top++] = page_phys;
       }
     }
   }
 }
 
-void* pmm_alloc_page(void)
+uint64_t pmm_alloc_page_phys(void)
 {
-  if (g_free_top == 0) return (void*)0;
-  uint64_t addr = g_free_pages[--g_free_top];
-  return (void*)(uintptr_t)addr; // identity-mapped for now
+  if (g_free_top == 0) return 0;
+  return g_free_pages[--g_free_top];   // already physical
 }
 
-void pmm_free_page(void *p)
+void pmm_free_page_phys(uint64_t phys)
 {
-  if (!p) return;
-  uint64_t addr = (uint64_t)(uintptr_t)p;
-  addr &= ~(PAGE_SIZE - 1);
+  if (!phys) return;
+  phys &= ~(PAGE_SIZE - 1);
 
   if (g_free_top < MAX_FREE_PAGES) {
-    g_free_pages[g_free_top++] = addr;
+    g_free_pages[g_free_top++] = phys;
   }
 }
 
