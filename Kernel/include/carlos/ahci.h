@@ -6,3 +6,6 @@ int ahci_probe_bdf(uint8_t b, uint8_t d, uint8_t f); // explicit
 
 // Read `count` sectors (512B each) from `lba` into `buf` using port `port`.
 int ahci_read(uint32_t port, uint64_t lba, uint32_t count, void *buf);
+
+// Write `count` sectors (512B each) from `buf` to `lba` using port `port`.
+int ahci_write(uint32_t port, uint64_t lba, uint32_t count, const void *buf);

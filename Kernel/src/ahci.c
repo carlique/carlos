@@ -374,3 +374,77 @@ int ahci_read(uint32_t port, uint64_t lba, uint32_t count, void *buf){
 
   return 0;
 }
+
+int ahci_write(uint32_t port, uint64_t lba, uint32_t count, const void *buf){
+  if (!buf || count == 0) return -1;
+
+  if (!abar) {
+    int prc = ahci_probe();
+    if (prc != 0 || !abar) return -2;
+  }
+
+  int rc = ahci_port_init(port);
+  if (rc != 0) return rc;
+
+  uint64_t hba = (uint64_t)(uintptr_t)iomap(abar, 0x2000, 0);
+  uint64_t pr  = hba + AHCI_PORTS + (uint64_t)port * AHCI_PORT_SZ;
+
+  AhciPortState *ps = &g_ports[port];
+  HbaCmdHdr *cl = (HbaCmdHdr*)ps->clb;
+  HbaCmdTbl *tbl = (HbaCmdTbl*)ps->ctba;
+
+  for (int i=0; i<1000000; i++){
+    uint32_t tfd = mmio_read32_phys(pr + P_TFD);
+    if ((tfd & (1u<<7)) == 0 && (tfd & (1u<<3)) == 0) break;
+  }
+
+  for (size_t i = 0; i < sizeof(HbaCmdTbl); i++) ((uint8_t*)tbl)[i] = 0;
+
+  uint64_t buf_phys = (uint64_t)(uintptr_t)buf;
+  tbl->prdt[0].dba  = (uint32_t)(buf_phys & 0xFFFFFFFF);
+  tbl->prdt[0].dbau = (uint32_t)(buf_phys >> 32);
+  tbl->prdt[0].dbc  = (count * 512) - 1;
+  tbl->prdt[0].i    = 0;
+
+  uint8_t *cfis = tbl->cfis;
+  cfis[0] = 0x27;
+  cfis[1] = 1<<7;
+  cfis[2] = 0x35;   // ATA WRITE DMA EXT
+  cfis[3] = 0;
+
+  cfis[4]  = (uint8_t)(lba & 0xFF);
+  cfis[5]  = (uint8_t)((lba >> 8) & 0xFF);
+  cfis[6]  = (uint8_t)((lba >> 16) & 0xFF);
+  cfis[7]  = 1<<6;
+  cfis[8]  = (uint8_t)((lba >> 24) & 0xFF);
+  cfis[9]  = (uint8_t)((lba >> 32) & 0xFF);
+  cfis[10] = (uint8_t)((lba >> 40) & 0xFF);
+  cfis[11] = 0;
+
+  cfis[12]= (uint8_t)(count & 0xFF);
+  cfis[13]= (uint8_t)((count >> 8) & 0xFF);
+  cfis[14]= 0;
+  cfis[15]= 0;
+
+  cl[0].w = 1;      // WRITE
+  cl[0].prdtl = 1;
+
+  mmio_write32_phys(pr + P_IS,   0xFFFFFFFF);
+  mmio_write32_phys(pr + P_SERR, 0xFFFFFFFF);
+
+  mmio_write32_phys(pr + P_CI, 1u);
+
+  for (int i=0; i<5000000; i++){
+    uint32_t ci = mmio_read32_phys(pr + P_CI);
+    if ((ci & 1u) == 0) break;
+  }
+
+  uint32_t is  = mmio_read32_phys(pr + P_IS);
+  uint32_t tfd = mmio_read32_phys(pr + P_TFD);
+  if (is & (1u<<30)) {
+    kprintf("AHCI: write error TFES, IS=0x%x TFD=0x%x\n", is, tfd);
+    return -10;
+  } 
+
+  return 0;
+}

@@ -27,7 +27,7 @@ SRCS_C := \
   src/kbd.c src/fbcon.c src/kapi.c src/acpi.c src/idt.c src/isr.c src/gdt.c \
   src/hpet.c src/time.c src/pci.c src/ahci.c \
   src/fs.c src/fat16.c src/part.c src/disk.c src/disk_ahci.c \
-  src/mem.c src/ls.c src/part_gpt.c
+  src/mem.c src/ls.c src/part_gpt.c src/mkdir.c
 
 # Only entry.S goes through the generic %.S -> %.o rule
 SRCS_S := src/entry.S

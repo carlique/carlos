@@ -9,12 +9,14 @@
 #include <carlos/time.h>
 #include <carlos/pci.h>
 #include <carlos/ahci.h>
+#include <carlos/fs.h>
+
 #include <carlos/ls.h>
+#include <carlos/mkdir.h>
 
 #define SHELL_MAX_ARGS 8
 
-static Fs g_fs;
-static int g_fs_ready = 0;
+static Fs *g_fs = NULL;
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -323,10 +325,14 @@ static void run_cmd(char *line){
   if (kstreq(cmd, "ahci_read")) { cmd_ahci_read(arg); return; }
 
   if (kstreq(cmd, "ls")) {
-    if (!g_fs_ready) { kprintf("ls: fs not mounted\n"); return; }
-    // linux-style applet signature
-    // (ls itself decides default path if argc==1)
-    (void)ls_main(&g_fs, argc, argv);
+    if (!g_fs) { kprintf("ls: fs not mounted\n"); return; }
+    (void)ls_main(g_fs, argc, argv);
+    return;
+  }
+
+  if (kstreq(cmd, "mkdir")) {
+    if (!g_fs) { kprintf("mkdir: fs not mounted\n"); return; }
+    (void)mkdir_cmd(g_fs, arg);
     return;
   }
 
@@ -335,15 +341,10 @@ static void run_cmd(char *line){
   kputs("\n");
 }
 
-void shell_run(const BootInfo *bi){
-  
+void shell_run(const BootInfo *bi, Fs *fs) {
   (void)bi;
 
-  if (!g_fs_ready) {
-    int rc = fs_mount_esp(&g_fs);
-    kprintf("FS: mount rc=%d\n", rc);
-    g_fs_ready = (rc == 0);
-  }
+  g_fs = fs;
 
   kputs("Carlos shell ready. Type 'help'.\n");
   prompt();

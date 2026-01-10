@@ -4,3 +4,8 @@ int disk_read(Disk *d, uint64_t lba, uint32_t count, void *buf){
   if (!d || !d->read || !buf || count == 0) return -1;
   return d->read(d, lba, count, buf);
 }
+
+int disk_write(Disk *d, uint64_t lba, uint32_t count, const void *buf){
+  if (!d || !d->write) return -1;
+  return d->write(d, lba, count, buf);
+}

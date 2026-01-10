@@ -18,6 +18,8 @@
 static BootInfo g_bi;              // kernel-owned copy
 static const BootInfo *g_bip = 0;  // pointer used by the rest of the kernel
 
+static Fs g_rootfs;               // root filesystem
+static int g_rootfs_ready = 0;    // set to 1 if mounted successfully
 
 void acpi_probe(const BootInfo *bi);
 
@@ -117,25 +119,12 @@ void kmain(BootInfo* bi){
   buf[63] = 0;
   kprintf("kmalloc ok: %p\n", buf);
 
-  static Fs fs;
-  rc = fs_mount_root(&fs, g_bip);
-  kprintf("FS: mount rc=%d\n", rc);
+  // ---- Mount root filesystem ----
+  rc = fs_mount_root(&g_rootfs, g_bip);  
+  kprintf("FS: mount_root rc=%d\n", rc);
+  g_rootfs_ready = (rc == 0);
 
-  if (rc == 0) {
-    kprintf("FS: list /\n");
-    rc = fs_list_dir(&fs, "/");
-    kprintf("FS: list / rc=%d\n", rc);
-
-    kprintf("FS: list /EFI\n");
-    rc = fs_list_dir(&fs, "/EFI");
-    kprintf("FS: list /EFI rc=%d\n", rc);
-
-    kprintf("FS: list /EFI/CARLOS\n");
-    rc = fs_list_dir(&fs, "/EFI/CARLOS");
-    kprintf("FS: list /EFI/CARLOS rc=%d\n", rc);
-  }
-
-  shell_run(g_bip);
+  shell_run(g_bip, g_rootfs_ready ? &g_rootfs : NULL);
 
   for(;;) __asm__ volatile ("hlt");
 }
