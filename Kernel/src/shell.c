@@ -10,13 +10,16 @@
 #include <carlos/pci.h>
 #include <carlos/ahci.h>
 #include <carlos/fs.h>
+#include <carlos/path.h>
 
 #include <carlos/ls.h>
 #include <carlos/mkdir.h>
 
 #define SHELL_MAX_ARGS 8
 
-static Fs *g_fs = NULL;
+static Fs *g_fs = NULL; 
+
+static char g_cwd[CARLOS_PATH_MAX] = "/";   // start at root
 
 static inline void outb(uint16_t port, uint8_t val){
   __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -157,8 +160,83 @@ static void cpu_halt_forever(void){
   for(;;) __asm__ volatile ("hlt");
 }
 
+static void path_join(char *out, size_t cap, const char *cwd, const char *arg){
+  // if arg is absolute -> use it, else cwd + "/" + arg
+  size_t j = 0;
+  if (!out || cap == 0) return;
+  out[0] = 0;
+
+  const char *p = arg;
+  while (p && *p && path_is_sep(*p)) { out[j++] = '/'; break; }
+
+  if (!(arg && (arg[0]=='/' || arg[0]=='\\'))) {
+    // copy cwd
+    for (size_t i=0; cwd && cwd[i] && j+1<cap; i++){
+      char c = cwd[i];
+      out[j++] = (c=='\\') ? '/' : c;
+    }
+    if (j==0) out[j++] = '/';
+    if (j>1 && out[j-1] != '/' && j+1<cap) out[j++] = '/';
+    p = arg;
+  }
+
+  // copy arg
+  for (size_t i=0; p && p[i] && j+1<cap; i++){
+    char c = p[i];
+    out[j++] = (c=='\\') ? '/' : c;
+  }
+  out[j] = 0;
+}
+
+// in-place normalize: collapse //, resolve /./ and /../
+static void path_normalize(char *p){
+  if (!p) return;
+
+  char out[256];
+  size_t oi = 0;
+
+  // ensure starts with /
+  size_t i = 0;
+  if (p[0] != '/') { out[oi++] = '/'; }
+  else { out[oi++] = '/'; i = 1; }
+
+  while (p[i]) {
+    while (p[i] == '/') i++;
+
+    // read component
+    char comp[64];
+    size_t ci = 0;
+    while (p[i] && p[i] != '/' && ci+1 < sizeof(comp)) comp[ci++] = p[i++];
+    comp[ci] = 0;
+
+    if (ci == 0) break;
+    if (ci == 1 && comp[0] == '.') continue;
+
+    if (ci == 2 && comp[0] == '.' && comp[1] == '.') {
+      // pop one component
+      if (oi > 1) {
+        oi--; // currently at '/' after last comp
+        while (oi > 1 && out[oi-1] != '/') oi--;
+      }
+      continue;
+    }
+
+    // append component
+    if (oi > 1 && out[oi-1] != '/') out[oi++] = '/';
+    for (size_t k=0; comp[k] && oi+1<sizeof(out); k++) out[oi++] = comp[k];
+    out[oi] = 0;
+  }
+
+  // trim trailing slash except root
+  if (oi > 1 && out[oi-1] == '/') out[oi-1] = 0;
+
+  // copy back
+  for (size_t k=0; out[k]; k++) p[k] = out[k];
+  p[oi] = 0;
+}
+
 static void prompt(void){
-  kputs("carlos> ");
+  kprintf("carlos:%s> ", g_cwd);
 }
 
 static void cmd_help(void){
@@ -176,6 +254,36 @@ static void cmd_help(void){
   kputs("  pcidump BB:DD.F - dump PCI config of device\n");
   kputs("  ahci    - probe for AHCI controller\n");
   kputs("  ahci_read <port> <lba> [count] - read sectors via AHCI and hexdump\n");
+}
+
+static void cmd_cwd(void){
+  kprintf("%s\n", g_cwd);
+}
+
+static void cmd_cd(const char *arg){
+  if (!g_fs) { kprintf("cd: fs not mounted\n"); return; }
+
+  if (!arg || arg[0] == 0) {
+    g_cwd[0] = '/'; g_cwd[1] = 0;
+    return;
+  }
+
+  char cand[256];
+  path_join(cand, sizeof(cand), g_cwd, arg);
+  path_normalize(cand);
+
+  // check it exists and is a dir
+  uint16_t clus = 0;
+  uint8_t  attr = 0;
+  uint32_t size = 0;
+  int rc = fat16_stat_path83(&g_fs->fat, cand, &clus, &attr, &size);
+  if (rc != 0) { kprintf("cd: not found: %s\n", cand); return; }
+  if ((attr & 0x10) == 0) { kprintf("cd: not a directory: %s\n", cand); return; }
+
+  // accept
+  // (cand is already normalized; also ok if it's "/")
+  kstrncpy(g_cwd, cand, sizeof(g_cwd)-1);
+  g_cwd[sizeof(g_cwd)-1] = 0;
 }
 
 static void cmd_mem(void){
@@ -309,6 +417,9 @@ static void run_cmd(char *line){
 
   // Dispatch
   if (kstreq(cmd, "help"))   { cmd_help();   return; }
+  if (kstreq(cmd, "cwd")) { cmd_cwd(); return; }
+  if (kstreq(cmd, "pwd")) { cmd_cwd(); return; }
+  if (kstreq(cmd, "cd")) { cmd_cd(arg); return; }
   if (kstreq(cmd, "mem"))    { cmd_mem();    return; }
   if (kstreq(cmd, "alloc"))  { cmd_alloc();  return; }
   if (kstreq(cmd, "clear"))  { cmd_clear();  return; }
@@ -326,7 +437,7 @@ static void run_cmd(char *line){
 
   if (kstreq(cmd, "ls")) {
     if (!g_fs) { kprintf("ls: fs not mounted\n"); return; }
-    (void)ls_main(g_fs, argc, argv);
+    (void)ls_main(g_fs, g_cwd, argc, argv);
     return;
   }
 
