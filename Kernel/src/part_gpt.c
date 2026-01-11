@@ -102,6 +102,10 @@ static int guid_parse(const char *s, Guid *out){
     }
   }
 
+  // after validating 36 chars:
+  char tail = s[36];
+  if (!(tail == 0 || tail == '}' )) return -4;
+
   uint32_t d1=0; uint16_t d2=0, d3=0;
   int rc;
 
