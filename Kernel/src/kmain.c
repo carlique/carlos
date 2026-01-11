@@ -34,7 +34,8 @@ void kmain(BootInfo* bi){
   klog_init();
   kprintf("CarlKernel: hello from kernel!\n");
   kprintf("KERNEL BUILD: %s %s\n", __DATE__, __TIME__);
-
+  kprintf("klog: level=%u mask=0x%08x\n", (unsigned)g_klog_level, (unsigned)g_klog_mask);
+  
   gdt_init();
   kprintf("GDT/TSS: OK\n");
 

@@ -10,6 +10,9 @@ LDSCRIPT:= linker.ld
 ESP_KERNEL := ../qemu/esp/EFI/CARLOS/KERNEL.ELF
 
 # ---- Flags ----
+LOG_LEVEL ?= KLOG_INFO
+LOG_MASK  ?= KLOG_MOD_ALL
+
 INCLUDES := -Iinclude -I../Common/include -I../Libc/include -Ithird_party/font8x8
 
 CFLAGS  := -target $(TARGET) -std=c11 -O2 -g \
@@ -17,6 +20,8 @@ CFLAGS  := -target $(TARGET) -std=c11 -O2 -g \
            -mno-red-zone -mcmodel=kernel \
            -Wall -Wextra -Werror \
            $(INCLUDES)
+
+CFLAGS += -DKLOG_DEFAULT_LEVEL=$(LOG_LEVEL) -DKLOG_DEFAULT_MASK=$(LOG_MASK)
 
 ASFLAGS := -target $(TARGET) -ffreestanding
 LDFLAGS := -T $(LDSCRIPT) -nostdlib

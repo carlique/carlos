@@ -2,16 +2,14 @@
 #include <carlos/boot/bootinfo.h>
 #include <carlos/phys.h>
 #include <carlos/pmm.h>
+#include <carlos/klog.h>
 
-// ---- Optional debug (off by default) ----
-#define PMM_DEBUG 1
-
-#if PMM_DEBUG
-  #include <carlos/klog.h>
-  #define PMM_LOG(...) kprintf(__VA_ARGS__)
-#else
-  #define PMM_LOG(...) ((void)0)
-#endif
+// pmm.c logging (runtime controlled by g_klog_level + g_klog_mask)
+#define PMM_TRACE(...) KLOG(KLOG_MOD_PMM, KLOG_TRACE, __VA_ARGS__)
+#define PMM_DBG(...)   KLOG(KLOG_MOD_PMM, KLOG_DBG,   __VA_ARGS__)
+#define PMM_INFO(...)  KLOG(KLOG_MOD_PMM, KLOG_INFO,  __VA_ARGS__)
+#define PMM_WARN(...)  KLOG(KLOG_MOD_PMM, KLOG_WARN,  __VA_ARGS__)
+#define PMM_ERR(...)   KLOG(KLOG_MOD_PMM, KLOG_ERR,   __VA_ARGS__)
 
 extern uint8_t __kernel_start;
 extern uint8_t __kernel_end;
@@ -179,7 +177,7 @@ uint64_t pmm_alloc_contig_pages_phys(uint64_t pages)
   
   if (g_free_top < pages) return 0;
 
-  PMM_LOG("pmm: contig request pages=%llu free=%llu\n",
+  PMM_DBG("pmm: contig request pages=%llu free=%llu\n",
           (unsigned long long)pages, (unsigned long long)g_free_top);
 
   for (uint64_t i = 0; i + pages <= g_free_top; i++){
@@ -195,12 +193,12 @@ uint64_t pmm_alloc_contig_pages_phys(uint64_t pages)
     }
     g_free_top -= pages;
 
-    PMM_LOG("pmm: contig ok base=0x%llx free=%llu\n",
+    PMM_DBG("pmm: contig ok base=0x%llx free=%llu\n",
             (unsigned long long)base, (unsigned long long)g_free_top);
     return base;
   }
 
-  PMM_LOG("pmm: contig FAIL pages=%llu free=%llu\n",
+  PMM_WARN("pmm: contig FAIL pages=%llu free=%llu\n",
           (unsigned long long)pages, (unsigned long long)g_free_top);
   return 0;
 }
@@ -211,7 +209,7 @@ void pmm_free_contig_pages_phys(uint64_t base_phys, uint64_t pages)
 
   // must be page-aligned
   if (base_phys & (PAGE_SIZE - 1)) {
-    PMM_LOG("pmm: free_contig bad align base=0x%llx\n", (unsigned long long)base_phys);
+    PMM_WARN("pmm: free_contig bad align base=0x%llx\n", (unsigned long long)base_phys);
     return;
   }
 
@@ -225,13 +223,13 @@ void pmm_free_contig_pages_phys(uint64_t base_phys, uint64_t pages)
 
     // optional: avoid double-free duplicates
     if (pos < g_free_top && g_free_pages[pos] == phys) {
-      PMM_LOG("pmm: free_contig duplicate phys=0x%llx\n", (unsigned long long)phys);
+      PMM_WARN("pmm: free_contig duplicate phys=0x%llx\n", (unsigned long long)phys);
       continue;
     }
 
     // capacity check (whatever your max is)
     if (g_free_top >= MAX_FREE_PAGES) {
-      PMM_LOG("pmm: free_contig overflow\n");
+      PMM_WARN("pmm: free_contig overflow\n");
       return;
     }
 
@@ -244,7 +242,7 @@ void pmm_free_contig_pages_phys(uint64_t base_phys, uint64_t pages)
     g_free_top++;
   }
 
-  PMM_LOG("pmm: free_contig base=0x%llx pages=%llu free=%llu\n",
+  PMM_DBG("pmm: free_contig base=0x%llx pages=%llu free=%llu\n",
           (unsigned long long)base_phys,
           (unsigned long long)pages,
           (unsigned long long)g_free_top);

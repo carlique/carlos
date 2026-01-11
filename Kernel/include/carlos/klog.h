@@ -1,6 +1,8 @@
 #pragma once
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
+
 #include <carlos/boot/bootinfo.h>
 
 typedef enum {
@@ -10,6 +12,14 @@ typedef enum {
   KLOG_DBG  = 3,
   KLOG_TRACE= 4
 } KLogLevel;
+
+#ifndef KLOG_DEFAULT_LEVEL
+  #define KLOG_DEFAULT_LEVEL KLOG_INFO
+#endif
+
+#ifndef KLOG_DEFAULT_MASK
+  #define KLOG_DEFAULT_MASK  KLOG_MOD_ALL
+#endif
 
 // runtime controls
 extern volatile uint8_t  g_klog_level;

@@ -8,8 +8,16 @@
 
 static int fb_enabled = 0;
 
-volatile uint8_t  g_klog_level = KLOG_INFO;
-volatile uint32_t g_klog_mask  = KLOG_MOD_ALL;
+#ifndef KLOG_DEFAULT_LEVEL
+  #define KLOG_DEFAULT_LEVEL KLOG_INFO
+#endif
+
+#ifndef KLOG_DEFAULT_MASK
+  #define KLOG_DEFAULT_MASK KLOG_MOD_ALL
+#endif
+
+volatile uint8_t  g_klog_level = (uint8_t)KLOG_DEFAULT_LEVEL;
+volatile uint32_t g_klog_mask  = (uint32_t)KLOG_DEFAULT_MASK;
 
 #define KLOG_RING 1
 #define KLOG_RING_SIZE 8192
