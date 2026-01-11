@@ -302,3 +302,54 @@ int fs_mkdir(Fs *fs, const char *path)
   // write API is only visible via fat16_w.h
   return fat16_mkdir_path83(&fs->fat, p83);
 }
+
+int fs_listdir(Fs *fs, const char *path, fs_listdir_cb cb, void *ud)
+{
+  if (!fs || !cb) return -1;
+
+  FatDirIter it;
+  int rc = 0;
+
+  if (is_root_path(path)) {
+    rc = fat16_root_iter_begin(&fs->fat, &it);
+    if (rc != 0) return rc;
+  } else {
+    char p83[256];
+    norm_path83(path, p83, sizeof(p83));
+
+    uint8_t  attr = 0;
+    uint16_t clus = 0;
+    uint32_t size = 0;
+
+    rc = fat16_stat_path83(&fs->fat, p83, &clus, &attr, &size);
+    if (rc != 0) return rc;
+
+    if ((attr & FAT_ATTR_DIR) == 0) return -2;
+
+    rc = fat16_dir_iter_begin(&fs->fat, &it, clus);
+    if (rc != 0) return rc;
+  }
+
+  int n = 0;
+  for (;;) {
+    char name83[13];
+    uint8_t attr = 0;
+    uint16_t clus = 0;
+    uint32_t size = 0;
+
+    rc = fat16_dir_iter_next(&it, name83, &attr, &clus, &size);
+    if (rc > 0) break;      // end
+    if (rc < 0) return rc;  // error
+
+    // skip "." and ".."
+    if (name83[0] == '.' && name83[1] == 0) continue;
+    if (name83[0] == '.' && name83[1] == '.' && name83[2] == 0) continue;
+
+    int cb_rc = cb(ud, name83, attr, size);
+    if (cb_rc != 0) break;
+
+    n++;
+  }
+
+  return n;
+}

@@ -189,53 +189,6 @@ static void path_join(char *out, size_t cap, const char *cwd, const char *arg){
   out[j] = 0;
 }
 
-// in-place normalize: collapse //, resolve /./ and /../
-static void path_normalize(char *p){
-  if (!p) return;
-
-  char out[256];
-  size_t oi = 0;
-
-  // ensure starts with /
-  size_t i = 0;
-  if (p[0] != '/') { out[oi++] = '/'; }
-  else { out[oi++] = '/'; i = 1; }
-
-  while (p[i]) {
-    while (p[i] == '/') i++;
-
-    // read component
-    char comp[64];
-    size_t ci = 0;
-    while (p[i] && p[i] != '/' && ci+1 < sizeof(comp)) comp[ci++] = p[i++];
-    comp[ci] = 0;
-
-    if (ci == 0) break;
-    if (ci == 1 && comp[0] == '.') continue;
-
-    if (ci == 2 && comp[0] == '.' && comp[1] == '.') {
-      // pop one component
-      if (oi > 1) {
-        oi--; // currently at '/' after last comp
-        while (oi > 1 && out[oi-1] != '/') oi--;
-      }
-      continue;
-    }
-
-    // append component
-    if (oi > 1 && out[oi-1] != '/') out[oi++] = '/';
-    for (size_t k=0; comp[k] && oi+1<sizeof(out); k++) out[oi++] = comp[k];
-    out[oi] = 0;
-  }
-
-  // trim trailing slash except root
-  if (oi > 1 && out[oi-1] == '/') out[oi-1] = 0;
-
-  // copy back
-  for (size_t k=0; out[k]; k++) p[k] = out[k];
-  p[oi] = 0;
-}
-
 static void prompt(void){
   kprintf("carlos:%s> ", g_cwd);
 }
@@ -272,7 +225,7 @@ static void cmd_cd(const char *arg){
 
   char cand[256];
   path_join(cand, sizeof(cand), g_cwd, arg);
-  path_normalize(cand);
+  path_normalize_abs(cand, sizeof(cand));
 
   // check it exists and is a dir
   uint16_t clus = 0;
