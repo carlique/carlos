@@ -253,12 +253,14 @@ int fs_read_file(Fs *fs, const char *path,
   if (!fs || !path || !buf) return -1;
   if (len == 0) return 0;
 
-  // stat path (8.3, case-insensitive inside fat16)
+  char p83[256];
+  norm_path83(path, p83, sizeof(p83));
+
   uint16_t clus = 0;
   uint8_t  attr = 0;
   uint32_t size = 0;
 
-  int rc = fat16_stat_path83(&fs->fat, path, &clus, &attr, &size);
+  int rc = fat16_stat_path83(&fs->fat, p83, &clus, &attr, &size);
   if (rc != 0) return rc;
 
   if (attr & FAT_ATTR_DIR) return -2;

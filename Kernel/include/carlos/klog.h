@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <carlos/boot/bootinfo.h>
+#include <carlos/str.h>
 
 typedef enum {
   KLOG_ERR  = 0,
@@ -61,3 +62,20 @@ void kputs(const char *s);
 // printf-like logger to UART
 void kvprintf(const char *fmt, va_list ap);
 void kprintf(const char *fmt, ...);
+
+// parse helpers (return 0 on success, <0 on error)
+int klog_parse_level(const char *s, uint8_t *out_level);
+int klog_parse_mask (const char *s, uint32_t *out_mask);
+
+// setters that also accept strings
+int klog_set_level_str(const char *s);       // "dbg" / "3" / "KLOG_DBG"
+int klog_set_mask_str (const char *s);       // "0x2" / "2" / "KLOG_MOD_PMM"
+
+// direct setters
+void klog_set_level(uint8_t level);
+void klog_set_mask(uint32_t mask);
+
+// pretty-printers (optional but handy for shell)
+const char* klog_level_name(uint8_t lvl);
+void klog_print_state(void);   // prints current level/mask
+void klog_print_help(void);    // prints usage + module bits

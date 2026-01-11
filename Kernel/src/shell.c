@@ -255,6 +255,7 @@ static void cmd_help(void){
   kputs("  pcidump BB:DD.F - dump PCI config of device\n");
   kputs("  ahci    - probe for AHCI controller\n");
   kputs("  ahci_read <port> <lba> [count] - read sectors via AHCI and hexdump\n");
+  kputs("  log [lvl] [mask] - set logger (lvl: err|warn|info|dbg|trace)\n");
 }
 
 static void cmd_cwd(void){
@@ -285,6 +286,21 @@ static void cmd_cd(const char *arg){
   // (cand is already normalized; also ok if it's "/")
   kstrncpy(g_cwd, cand, sizeof(g_cwd)-1);
   g_cwd[sizeof(g_cwd)-1] = 0;
+}
+
+static void cmd_log(int argc, char **argv){
+  if (argc == 1) { klog_print_state(); return; }
+  if (argc == 2) {
+    if (klog_set_level_str(argv[1]) != 0) { klog_print_help(); return; }
+    klog_print_state();
+    return;
+  }
+  if (argc >= 3) {
+    if (klog_set_level_str(argv[1]) != 0) { klog_print_help(); return; }
+    if (klog_set_mask_str(argv[2])  != 0) { klog_print_help(); return; }
+    klog_print_state();
+    return;
+  }
 }
 
 static void cmd_mem(void){
@@ -421,6 +437,9 @@ static void run_cmd(char *line){
   if (kstreq(cmd, "cwd")) { cmd_cwd(); return; }
   if (kstreq(cmd, "pwd")) { cmd_cwd(); return; }
   if (kstreq(cmd, "cd")) { cmd_cd(arg); return; }
+
+  if (kstreq(cmd, "log")) { cmd_log(argc, argv); return; }
+
   if (kstreq(cmd, "mem"))    { cmd_mem();    return; }
   if (kstreq(cmd, "alloc"))  { cmd_alloc();  return; }
   if (kstreq(cmd, "clear"))  { cmd_clear();  return; }

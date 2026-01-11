@@ -209,3 +209,136 @@ void kprintf(const char *fmt, ...) {
   kvprintf(fmt, ap);
   va_end(ap);
 }
+
+void klog_set_level(uint8_t level) { g_klog_level = level; }
+void klog_set_mask (uint32_t mask) { g_klog_mask  = mask; }
+
+const char* klog_level_name(uint8_t lvl){
+  switch (lvl){
+    case KLOG_ERR:   return "err";
+    case KLOG_WARN:  return "warn";
+    case KLOG_INFO:  return "info";
+    case KLOG_DBG:   return "dbg";
+    case KLOG_TRACE: return "trace";
+    default:         return "?";
+  }
+}
+
+static int is_dec_digit(char c){ return (c >= '0' && c <= '9'); }
+static int hexval_local(char c){
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+  return -1;
+}
+
+static int parse_u32_dec_local(const char *s, uint32_t *out){
+  if (!s || !*s || !is_dec_digit(*s)) return -1;
+  uint64_t v = 0;
+  while (*s && is_dec_digit(*s)){
+    v = v * 10 + (uint64_t)(*s - '0');
+    if (v > 0xFFFFFFFFull) return -1;
+    s++;
+  }
+  if (*s != 0) return -1; // reject trailing junk
+  *out = (uint32_t)v;
+  return 0;
+}
+
+static int parse_u32_hex_local(const char *s, uint32_t *out){
+  if (!s || s[0] != '0' || (s[1] != 'x' && s[1] != 'X')) return -1;
+  s += 2;
+  if (!*s) return -1;
+
+  uint64_t v = 0;
+  while (*s){
+    int h = hexval_local(*s);
+    if (h < 0) return -1;
+    v = (v << 4) | (uint64_t)h;
+    if (v > 0xFFFFFFFFull) return -1;
+    s++;
+  }
+  *out = (uint32_t)v;
+  return 0;
+}
+
+int klog_parse_level(const char *s, uint8_t *out_level){
+  if (!s || !*s || !out_level) return -1;
+
+  // numeric 0..255 (but you really only use 0..4)
+  if (is_dec_digit(s[0])) {
+    uint32_t v = 0;
+    if (parse_u32_dec_local(s, &v) != 0) return -1;
+    if (v > 255) return -1;
+    *out_level = (uint8_t)v;
+    return 0;
+  }
+
+  if (kstreq(s, "err")   || kstreq(s, "KLOG_ERR"))   { *out_level = KLOG_ERR;   return 0; }
+  if (kstreq(s, "warn")  || kstreq(s, "KLOG_WARN"))  { *out_level = KLOG_WARN;  return 0; }
+  if (kstreq(s, "info")  || kstreq(s, "KLOG_INFO"))  { *out_level = KLOG_INFO;  return 0; }
+  if (kstreq(s, "dbg")   || kstreq(s, "KLOG_DBG"))   { *out_level = KLOG_DBG;   return 0; }
+  if (kstreq(s, "trace") || kstreq(s, "KLOG_TRACE")) { *out_level = KLOG_TRACE; return 0; }
+
+  return -1;
+}
+
+static int klog_parse_mask_name(const char *s, uint32_t *out){
+  if (!s || !*s) return -1;
+
+  if (kstreq(s, "all") || kstreq(s, "KLOG_MOD_ALL")) { *out = KLOG_MOD_ALL; return 0; }
+
+  if (kstreq(s, "core")  || kstreq(s, "KLOG_MOD_CORE"))  { *out = KLOG_MOD_CORE; return 0; }
+  if (kstreq(s, "pmm")   || kstreq(s, "KLOG_MOD_PMM"))   { *out = KLOG_MOD_PMM;  return 0; }
+  if (kstreq(s, "kmem")  || kstreq(s, "KLOG_MOD_KMEM"))  { *out = KLOG_MOD_KMEM; return 0; }
+  if (kstreq(s, "exec")  || kstreq(s, "KLOG_MOD_EXEC"))  { *out = KLOG_MOD_EXEC; return 0; }
+  if (kstreq(s, "fat")   || kstreq(s, "KLOG_MOD_FAT"))   { *out = KLOG_MOD_FAT;  return 0; }
+  if (kstreq(s, "fs")    || kstreq(s, "KLOG_MOD_FS"))    { *out = KLOG_MOD_FS;   return 0; }
+  if (kstreq(s, "kapi")  || kstreq(s, "KLOG_MOD_KAPI"))  { *out = KLOG_MOD_KAPI; return 0; }
+  if (kstreq(s, "shell") || kstreq(s, "KLOG_MOD_SHELL")) { *out = KLOG_MOD_SHELL;return 0; }
+
+  return -1;
+}
+
+int klog_parse_mask(const char *s, uint32_t *out_mask){
+  if (!s || !*s || !out_mask) return -1;
+
+  // allow names
+  uint32_t named = 0;
+  if (klog_parse_mask_name(s, &named) == 0) { *out_mask = named; return 0; }
+
+  // allow hex or decimal
+  uint32_t v = 0;
+  if (parse_u32_hex_local(s, &v) == 0) { *out_mask = v; return 0; }
+  if (parse_u32_dec_local(s, &v) == 0) { *out_mask = v; return 0; }
+
+  return -1;
+}
+
+int klog_set_level_str(const char *s){
+  uint8_t lvl = 0;
+  if (klog_parse_level(s, &lvl) != 0) return -1;
+  klog_set_level(lvl);
+  return 0;
+}
+
+int klog_set_mask_str(const char *s){
+  uint32_t m = 0;
+  if (klog_parse_mask(s, &m) != 0) return -1;
+  klog_set_mask(m);
+  return 0;
+}
+
+void klog_print_state(void){
+  kprintf("log: level=%u (%s) mask=0x%08x\n",
+          (unsigned)g_klog_level, klog_level_name(g_klog_level),
+          (unsigned)g_klog_mask);
+}
+
+void klog_print_help(void){
+  kputs("usage:\n");
+  kputs("  log                      - show current\n");
+  kputs("  log <lvl>                - set level (err|warn|info|dbg|trace|N)\n");
+  kputs("  log <lvl> <mask>         - set level+mask (mask: 0x.. | dec | name)\n");
+  kputs("mask names: all core pmm kmem exec fat fs kapi shell\n");
+}
