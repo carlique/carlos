@@ -64,28 +64,35 @@ static int fat_read_sector(Fat16 *fs, uint64_t lba, void *buf){
 static int fat_next_clus(Fat16 *fs, uint16_t clus, uint16_t *out){
   if (!fs || !out) return -1;
 
-  // FAT entry = 16-bit at offset clus*2
   uint32_t off = (uint32_t)clus * 2u;
   uint32_t sec = off / fs->bps;
   uint32_t idx = off % fs->bps;
 
   uint8_t buf[512];
 
-  // --- read FAT#0 ---
   int rc = fat_read_sector(fs, fs->fat_lba + sec, buf);
-  if (rc != 0) return -2;
+  if (rc != 0) {
+    FAT_ERR("fat: next_clus read fat0 clus=%u sec=%u rc=%d\n",
+            (unsigned)clus, (unsigned)sec, rc);
+    return -2;
+  }
 
   uint16_t v0 = rd16(&buf[idx]);
 
-  // If FAT#0 says "free" but we have a mirror, try FAT#1.
-  // This helps when an external tool wrote only FAT#1 (or your kernel wrote only FAT#0).
   if (v0 == 0 && fs->nfats > 1) {
-    uint64_t fat1_lba = fs->fat_lba + (uint64_t)fs->fatsz; // FAT#1 starts after FAT#0 (fatsz sectors)
+    uint64_t fat1_lba = fs->fat_lba + (uint64_t)fs->fatsz;
     rc = fat_read_sector(fs, fat1_lba + sec, buf);
     if (rc == 0) {
       uint16_t v1 = rd16(&buf[idx]);
-      // TODO: if (v0 == 0 && fs->nfats > 1) { read FAT#1; if (v1 != 0) use v1; }
-      if (v1 != 0) { *out = v1; return 0; }
+      if (v1 != 0) {
+        FAT_WARN("fat: next_clus fat0=0 fat1=%u clus=%u\n",
+                 (unsigned)v1, (unsigned)clus);
+        *out = v1;
+        return 0;
+      }
+    } else {
+      FAT_WARN("fat: next_clus read fat1 failed clus=%u rc=%d\n",
+               (unsigned)clus, rc);
     }
   }
 
@@ -205,29 +212,41 @@ int fat16_mount(Fat16 *fs, Disk *disk, uint64_t base_lba){
 
   uint8_t bs[512];
   int rc = disk_read(disk, base_lba, 1, bs);
-  if (rc != 0) return rc;
+  if (rc != 0) { FAT_ERR("fat: mount read bs lba=%llu rc=%d\n",
+                         (unsigned long long)base_lba, rc); return rc; }
 
-  // signature 0x55AA at end of boot sector
-  if (bs[510] != 0x55 || bs[511] != 0xAA) return -2;
+  if (bs[510] != 0x55 || bs[511] != 0xAA) {
+    FAT_ERR("fat: bad bs sig %02x%02x lba=%llu\n", bs[510], bs[511],
+            (unsigned long long)base_lba);
+    return -2;
+  }
 
-  fs->bps      = rd16(&bs[11]);   // BPB_BytsPerSec
-  fs->spc      = bs[13];          // BPB_SecPerClus
-  fs->rsvd     = rd16(&bs[14]);   // BPB_RsvdSecCnt
-  fs->nfats    = bs[16];          // BPB_NumFATs
-  fs->root_ent = rd16(&bs[17]);   // BPB_RootEntCnt
-  fs->fatsz    = rd16(&bs[22]);   // BPB_FATSz16
+  fs->bps      = rd16(&bs[11]);
+  fs->spc      = bs[13];
+  fs->rsvd     = rd16(&bs[14]);
+  fs->nfats    = bs[16];
+  fs->root_ent = rd16(&bs[17]);
+  fs->fatsz    = rd16(&bs[22]);
 
-  if (fs->bps != 512) return -3;
-  if (fs->spc == 0) return -4;
-  if (fs->nfats == 0) return -5;
-  if (fs->fatsz == 0) return -6;
+  if (fs->bps != 512) { FAT_ERR("fat: bps=%u (want 512)\n", (unsigned)fs->bps); return -3; }
+  if (fs->spc == 0)   { FAT_ERR("fat: spc=0\n"); return -4; }
+  if (fs->nfats == 0) { FAT_ERR("fat: nfats=0\n"); return -5; }
+  if (fs->fatsz == 0) { FAT_ERR("fat: fatsz=0\n"); return -6; }
 
   fs->fat_lba = base_lba + (uint64_t)fs->rsvd;
-
   fs->root_secs = (uint32_t)(((uint32_t)fs->root_ent * 32u + (fs->bps - 1)) / fs->bps);
   fs->root_lba  = fs->fat_lba + (uint64_t)fs->nfats * (uint64_t)fs->fatsz;
-
   fs->data_lba  = fs->root_lba + (uint64_t)fs->root_secs;
+
+  FAT_INFO("fat: mount ok base=%llu bps=%u spc=%u rsvd=%u nfats=%u root_ent=%u fatsz=%u\n",
+           (unsigned long long)base_lba,
+           (unsigned)fs->bps, (unsigned)fs->spc, (unsigned)fs->rsvd,
+           (unsigned)fs->nfats, (unsigned)fs->root_ent, (unsigned)fs->fatsz);
+  FAT_DBG("fat: lbas fat=%llu root=%llu data=%llu root_secs=%u\n",
+          (unsigned long long)fs->fat_lba,
+          (unsigned long long)fs->root_lba,
+          (unsigned long long)fs->data_lba,
+          (unsigned)fs->root_secs);
 
   return 0;
 }
@@ -331,7 +350,10 @@ static int find_in_dir(Fat16 *fs, int in_root, uint16_t dir_clus,
     uint16_t c;
     uint32_t s;
     int rc = fat16_dir_iter_next(&it, tmp, &a, &c, &s);
-    if (rc != 0) return rc; // 1=end, <0=error
+    if (rc != 0) {
+      if (rc == 1) FAT_DBG("fat: find_in_dir miss '%s'\n", tname);
+      return rc;
+    }
 
     // case-insensitive compare (both should be uppercase already)
     int ok = 1;
@@ -357,6 +379,8 @@ static int find_in_dir(Fat16 *fs, int in_root, uint16_t dir_clus,
 int fat16_stat_path83(Fat16 *fs, const char *path,
                       uint16_t *clus, uint8_t *attr, uint32_t *size)
 {
+  FAT_TRACE("fat: stat '%s'\n", path);
+
   if (!fs || !path) return -1;
 
   if (clus) *clus = 0;
@@ -423,6 +447,9 @@ int fat16_stat_path83(Fat16 *fs, const char *path,
 int fat16_read_file_by_clus(Fat16 *fs, uint16_t first_clus,
                             uint32_t offset, uint32_t size, void *out)
 {
+  FAT_DBG("fat: read clus=%u off=%u size=%u\n",
+        (unsigned)first_clus, (unsigned)offset, (unsigned)size);
+
   if (!fs || !out) return -1;
   if (size == 0) return 0;
   if (first_clus < 2) return -2;
@@ -474,11 +501,9 @@ int fat16_read_file_by_clus(Fat16 *fs, uint16_t first_clus,
 
     uint16_t nxt = 0;
     if (fat_next_clus(fs, clus, &nxt) != 0) return -6;
-    if (clus_is_eoc(nxt)) return -7;
-    if (nxt < 2) return -8;
-        clus = nxt;
-    }
-
+    if (clus_is_eoc(nxt)) { FAT_ERR("fat: read hit eoc clus=%u\n", (unsigned)clus); return -7; }
+    if (nxt < 2)          { FAT_ERR("fat: read bad next=%u from clus=%u\n", (unsigned)nxt, (unsigned)clus); return -8; }
+  }
   return 0;
 }
 
@@ -543,6 +568,7 @@ int fat16_alloc_clus(Fat16 *fs, uint16_t *out_clus){
         if (rc != 0) return rc;
 
         *out_clus = found;
+        FAT_INFO("fat: alloc clus=%u\n", (unsigned)found);
         return 0;
       }
     }
@@ -708,6 +734,8 @@ static int init_dir_cluster(Fat16 *fs, uint16_t new_clus, uint16_t parent_clus_o
 }
 
 int fat16_mkdir_path83(Fat16 *fs, const char *path83){
+  FAT_INFO("fat: mkdir '%s'\n", path83);
+
   if (!fs || !path83) return -1;
 
   // If already exists -> error
@@ -765,6 +793,7 @@ int fat16_mkdir_path83(Fat16 *fs, const char *path83){
     uint64_t lba; uint32_t ei;
     rc = find_free_dirent_cluschain(fs, parent_clus, &last, &lba, &ei);
     if (rc == 0){
+      FAT_INFO("fat: mkdir ok '%s' clus=%u\n", path83, (unsigned)new_clus);
       return write_dirent_into_sector(fs, lba, ei, &ent);
     }
     if (rc < 0) return rc;
@@ -788,6 +817,7 @@ int fat16_mkdir_path83(Fat16 *fs, const char *path83){
     }
 
     // write entry into first slot of ext
+    FAT_INFO("fat: mkdir ok '%s' clus=%u\n", path83, (unsigned)new_clus);
     return write_dirent_into_sector(fs, base, 0, &ent);
   }
 }
