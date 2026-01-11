@@ -20,3 +20,5 @@ int fs_read_entire_file(Fs *fs, const char *path, void *buf, uint32_t cap, uint3
 int fs_read_file(Fs *fs, const char *path,
                  uint32_t offset, void *buf, uint32_t len,
                  uint32_t *out_read);
+
+int fs_mkdir(Fs *fs, const char *path);

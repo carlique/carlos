@@ -56,6 +56,4 @@ int fat16_stat_path83(Fat16 *fs, const char *path,
                       /*out*/ uint16_t *clus,
                       /*out*/ uint8_t  *attr,
                       /*out*/ uint32_t *size);
-
-int fat16_alloc_clus(Fat16 *fs, uint16_t *out_clus);
-int fat16_mkdir_path83(Fat16 *fs, const char *path83);
+                      

@@ -4,6 +4,7 @@
 #include <carlos/klog.h>
 #include <carlos/part.h>
 #include <carlos/fat16.h>
+#include <carlos/fat16_w.h>   // only fs.c gets write access
 #include <carlos/disk.h>
 
 #define FAT_ATTR_DIR 0x10
@@ -274,4 +275,14 @@ int fs_read_file(Fs *fs, const char *path,
 
   if (out_read) *out_read = take;
   return 0;
+}
+
+int fs_mkdir(Fs *fs, const char *path)
+{
+  if (!fs || !path) return -1;
+
+  char p83[256];
+  norm_path83(path, p83, sizeof(p83));
+
+  return fat16_mkdir_path83(&fs->fat, p83);
 }

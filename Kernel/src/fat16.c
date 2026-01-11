@@ -2,6 +2,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <carlos/fat16.h>
+#include <carlos/klog.h>
+
+// fat16.c logging (runtime controlled by g_klog_level + g_klog_mask)
+#define FAT_TRACE(...) KLOG(KLOG_MOD_FAT, KLOG_TRACE, __VA_ARGS__)
+#define FAT_DBG(...)   KLOG(KLOG_MOD_FAT, KLOG_DBG,   __VA_ARGS__)
+#define FAT_INFO(...)  KLOG(KLOG_MOD_FAT, KLOG_INFO,   __VA_ARGS__)
+#define FAT_WARN(...)  KLOG(KLOG_MOD_FAT, KLOG_WARN,  __VA_ARGS__)
+#define FAT_ERR(...)   KLOG(KLOG_MOD_FAT, KLOG_ERR,   __VA_ARGS__)
 
 // ---------- tiny helpers (no libc needed) ----------
 static inline uint16_t rd16(const void *p){
@@ -76,6 +84,7 @@ static int fat_next_clus(Fat16 *fs, uint16_t clus, uint16_t *out){
     rc = fat_read_sector(fs, fat1_lba + sec, buf);
     if (rc == 0) {
       uint16_t v1 = rd16(&buf[idx]);
+      // TODO: if (v0 == 0 && fs->nfats > 1) { read FAT#1; if (v1 != 0) use v1; }
       if (v1 != 0) { *out = v1; return 0; }
     }
   }
@@ -387,7 +396,7 @@ int fat16_stat_path83(Fat16 *fs, const char *path,
     // Find in current directory
     FatDirEnt e;
     rc = find_in_dir(fs, in_root, cur_dir_clus, t11, &e);
-    if (rc != 0) return -4;
+    if (rc != 0) return rc; // propagate: 1=end/not found, <0=io/format errors
 
     // Advance path
     path += n;
@@ -409,11 +418,6 @@ int fat16_stat_path83(Fat16 *fs, const char *path,
   }
 
   return -6;
-}
-
-int fat16_open_path83(Fat16 *fs, const char *path, uint16_t *clus, uint32_t *size){
-  uint8_t attr = 0;
-  return fat16_stat_path83(fs, path, clus, &attr, size);
 }
 
 int fat16_read_file_by_clus(Fat16 *fs, uint16_t first_clus,
