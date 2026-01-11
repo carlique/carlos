@@ -10,7 +10,7 @@ LDSCRIPT:= linker.ld
 ESP_KERNEL := ../qemu/esp/EFI/CARLOS/KERNEL.ELF
 
 # ---- Flags ----
-INCLUDES := -Iinclude -I../Common/include -Ithird_party/font8x8
+INCLUDES := -Iinclude -I../Common/include -I../Libc/include -Ithird_party/font8x8
 
 CFLAGS  := -target $(TARGET) -std=c11 -O2 -g \
            -ffreestanding -fno-stack-protector -fno-pic \
@@ -27,10 +27,10 @@ SRCS_C := \
   src/kbd.c src/fbcon.c src/kapi.c src/acpi.c src/idt.c src/isr.c src/gdt.c \
   src/hpet.c src/time.c src/pci.c src/ahci.c \
   src/fs.c src/fat16.c src/part.c src/disk.c src/disk_ahci.c \
-  src/mem.c src/ls.c src/part_gpt.c src/mkdir.c
+  src/mem.c src/ls.c src/part_gpt.c src/mkdir.c src/exec.c src/exec_elf.c
 
 # Only entry.S goes through the generic %.S -> %.o rule
-SRCS_S := src/entry.S
+SRCS_S := src/entry.S src/exec_s.S
 
 OBJS_C := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS_C))
 OBJS_S := $(patsubst src/%.S,$(BUILD)/%.o,$(SRCS_S))

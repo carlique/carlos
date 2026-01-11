@@ -15,6 +15,12 @@
 #include <carlos/fat16.h>
 #include <carlos/fs.h>
 
+/* 
+  TODO: implement DEBUGGING levels and use PMM_LOG() instead of kprintf() here
+  so that we can turn off verbose PMM logging when not needed.
+*/
+
+ /* ---------- Global state ---------- */ 
 static BootInfo g_bi;              // kernel-owned copy
 static const BootInfo *g_bip = 0;  // pointer used by the rest of the kernel
 
@@ -123,6 +129,9 @@ void kmain(BootInfo* bi){
   rc = fs_mount_root(&g_rootfs, g_bip);  
   kprintf("FS: mount_root rc=%d\n", rc);
   g_rootfs_ready = (rc == 0);
+
+  kapi_bind_fs(&g_rootfs);
+  
 
   shell_run(g_bip, g_rootfs_ready ? &g_rootfs : NULL);
 

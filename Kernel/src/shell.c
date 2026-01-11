@@ -11,6 +11,7 @@
 #include <carlos/ahci.h>
 #include <carlos/fs.h>
 #include <carlos/path.h>
+#include <carlos/exec.h>
 
 #include <carlos/ls.h>
 #include <carlos/mkdir.h>
@@ -437,7 +438,22 @@ static void run_cmd(char *line){
 
   if (kstreq(cmd, "ls")) {
     if (!g_fs) { kprintf("ls: fs not mounted\n"); return; }
-    (void)ls_main(g_fs, g_cwd, argc, argv);
+
+    // forward shell args to userland
+    char *uargv[SHELL_MAX_ARGS + 1];
+    int uargc = 0;
+
+    static char arg0[] = "ls";
+    uargv[uargc++] = arg0;
+
+    // copy everything after "ls" (so "ls bin" becomes argv[1]="bin")
+    for (int i = 1; i < argc && uargc < SHELL_MAX_ARGS; i++){
+      uargv[uargc++] = argv[i];
+    }
+    uargv[uargc] = 0;
+
+    int code = exec_run_path(g_fs, "BIN/LS.ELF", uargc, uargv, g_cwd);
+    kprintf("runls: exit=%d\n", code);
     return;
   }
 

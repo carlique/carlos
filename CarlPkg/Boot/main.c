@@ -1,5 +1,17 @@
+/* 
+    CarlPkg/Boot/main.c
+  
+    UEFI bootloader for Carlos OS.
+
+    Based on EDK2 libraries and protocols.
+    
+*/
+
+#include <stdint.h>
+
 #include <Uefi.h>
 
+// EDK2 Library includes
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
 #include <Library/BaseMemoryLib.h>        // CopyMem / ZeroMem
@@ -7,31 +19,44 @@
 #include <Library/PrintLib.h>             // AsciiSPrint / AsciiStrCpyS
 #include <Library/BaseLib.h>              // (safe helper lib)
 
+// EDK2 Protocol includes
 #include <Protocol/GraphicsOutput.h>
 #include <Protocol/LoadedImage.h>
 #include <Guid/Gpt.h>
 #include <Protocol/PartitionInfo.h>
 
+// ACPI includes
 #include <Guid/Acpi.h>
 
+// Carlos includes
 #include <carlos/boot/bootinfo.h>
+#include <carlos/uapi/abi.h>   
+
+// Local includes
 #include "uefi_log.h"
 #include "uefi_memmap.h"
 #include "uefi_fs.h"
 #include "uefi_elf.h"
 #include "uefi_acpi.h"
 
-#define KERNEL_PATH L"\\EFI\\CARLOS\\KERNEL.ELF"
+// Default path to kernel on ESP drive
+#define KERNEL_PATH "\\EFI\\CARLOS\\KERNEL.ELF"
+#define KERNEL_PATH_W L"\\EFI\\CARLOS\\KERNEL.ELF"
 
-// Raw COM1 for post-exit (same as you already have)
-#include <stdint.h>
+
+// Raw COM1 for post-exit 
 #define COM1 0x3F8
+
 static inline void outb(uint16_t port, uint8_t val){ __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port)); }
 static inline uint8_t inb(uint16_t port){ uint8_t r; __asm__ volatile ("inb %1, %0" : "=a"(r) : "Nd"(port)); return r; }
+
+// Initialize serial port (COM1) for raw output
+// 115200 8N1, no FIFO, no interrupts
 static void serial_init_raw(void){
   outb(COM1+1,0x00); outb(COM1+3,0x80); outb(COM1+0,0x03); outb(COM1+1,0x00);
   outb(COM1+3,0x03); outb(COM1+2,0xC7); outb(COM1+4,0x0B);
 }
+
 static void serial_putc_raw(char c){ while ((inb(COM1+5)&0x20)==0){} outb(COM1,(uint8_t)c); }
 static void serial_puts_raw(const char *s){ for(;*s;s++){ if(*s=='\n') serial_putc_raw('\r'); serial_putc_raw(*s);} }
 
@@ -39,7 +64,7 @@ typedef void (*KernelEntry)(BootInfo *bi);
 
 static VOID SetKernelPath(BootInfo *Bi) {
   // BootInfo expects ASCII char[], keep it simple
-  AsciiStrCpyS(Bi->kernel_path, sizeof(Bi->kernel_path), "\\EFI\\CARLOS\\KERNEL.ELF");
+  AsciiStrCpyS(Bi->kernel_path, sizeof(Bi->kernel_path), KERNEL_PATH);
 }
 
 static BOOLEAN FindGptPartGuidByName(CONST CHAR16 *Name, EFI_GUID *OutGuid) {
@@ -118,7 +143,7 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   // 1) Read kernel ELF from ESP
   VOID *KernelBuf = NULL;
   UINTN KernelSize = 0;
-  EFI_STATUS S = FsReadFileToBuffer(ImageHandle, KERNEL_PATH , &KernelBuf, &KernelSize);
+  EFI_STATUS S = FsReadFileToBuffer(ImageHandle, KERNEL_PATH_W , &KernelBuf, &KernelSize);
   Print(L"FsReadFileToBuffer -> %r (size=%lu)\n", S, (UINT64)KernelSize);
   if (EFI_ERROR(S)) return S;
 
@@ -149,13 +174,14 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   Print(L"root_spec=%a\n", Bi->root_spec);
   
   Bi->magic = CARLOS_BOOTINFO_MAGIC;
-  Bi->abi_version = 1;                 // or CARLOS_ABI_VERSION constant
+  Bi->abi_version   = CARLOS_ABI_VERSION;
+  Bi->bootinfo_size = (uint32_t)sizeof(BootInfo);            
   Bi->bootinfo_phys = (uint64_t)BiAddr; // physical address of BootInfo
 
   // 4) ExitBootServices using your proven memmap loop
   UEFI_MEMMAP Mm = (UEFI_MEMMAP){0};
 
-  EFI_PHYSICAL_ADDRESS MapCopyAddr = 0;
+  EFI_PHYSICAL_ADDRESS MapCopyAddr = 0; 
   UINTN MapCopyPages = 0;
 
   EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop = NULL;

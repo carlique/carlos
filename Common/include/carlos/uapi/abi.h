@@ -1,2 +1,2 @@
 #pragma once
-#define CARLOS_ABI_VERSION 1
+#define CARLOS_ABI_VERSION 2

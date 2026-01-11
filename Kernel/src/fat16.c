@@ -56,17 +56,34 @@ static int fat_read_sector(Fat16 *fs, uint64_t lba, void *buf){
 static int fat_next_clus(Fat16 *fs, uint16_t clus, uint16_t *out){
   if (!fs || !out) return -1;
 
+  // FAT entry = 16-bit at offset clus*2
   uint32_t off = (uint32_t)clus * 2u;
   uint32_t sec = off / fs->bps;
   uint32_t idx = off % fs->bps;
 
   uint8_t buf[512];
+
+  // --- read FAT#0 ---
   int rc = fat_read_sector(fs, fs->fat_lba + sec, buf);
   if (rc != 0) return -2;
 
-  *out = rd16(&buf[idx]);
+  uint16_t v0 = rd16(&buf[idx]);
+
+  // If FAT#0 says "free" but we have a mirror, try FAT#1.
+  // This helps when an external tool wrote only FAT#1 (or your kernel wrote only FAT#0).
+  if (v0 == 0 && fs->nfats > 1) {
+    uint64_t fat1_lba = fs->fat_lba + (uint64_t)fs->fatsz; // FAT#1 starts after FAT#0 (fatsz sectors)
+    rc = fat_read_sector(fs, fat1_lba + sec, buf);
+    if (rc == 0) {
+      uint16_t v1 = rd16(&buf[idx]);
+      if (v1 != 0) { *out = v1; return 0; }
+    }
+  }
+
+  *out = v0;
   return 0;
 }
+
 static int clus_is_eoc(uint16_t clus){
   return clus >= 0xFFF8u;
 }
