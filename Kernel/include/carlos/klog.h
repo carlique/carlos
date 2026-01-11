@@ -36,6 +36,8 @@ enum {
   KLOG_MOD_FS   = 1u<<5,
   KLOG_MOD_KAPI = 1u<<6,
   KLOG_MOD_SHELL= 1u<<7,
+  KLOG_MOD_DISK = 1u<<8,
+  KLOG_MOD_AHCI = 1u<<9,
   KLOG_MOD_ALL  = 0xFFFFFFFFu
 };
 
