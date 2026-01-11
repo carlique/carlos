@@ -12,7 +12,6 @@
 #include <carlos/time.h>
 #include <carlos/disk.h>
 #include <carlos/part.h>
-#include <carlos/fat16.h>
 #include <carlos/fs.h>
 
 /* 
@@ -35,7 +34,7 @@ void kmain(BootInfo* bi){
   kprintf("CarlKernel: hello from kernel!\n");
   kprintf("KERNEL BUILD: %s %s\n", __DATE__, __TIME__);
   kprintf("klog: level=%u mask=0x%08x\n", (unsigned)g_klog_level, (unsigned)g_klog_mask);
-  
+
   gdt_init();
   kprintf("GDT/TSS: OK\n");
 

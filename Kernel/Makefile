@@ -54,6 +54,8 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 $(BUILD)/isr_s.o: src/isr.S | $(BUILD)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
+$(BUILD)/fs.o: CFLAGS += -DCARLOS_FS_INTERNAL=1
+
 # ---- Default target ----
 .PHONY: all
 all: $(OUT)
