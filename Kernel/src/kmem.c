@@ -7,11 +7,8 @@
 
 #define PAGE_SIZE 4096ULL
 
-typedef struct {
-  uint64_t pages;  // 0 = small bump alloc, >0 = contig alloc pages
-  uint64_t size;   // requested size
-} KAllocHdr;
-
+// Simple bump-pointer kernel heap allocator (small allocs)
+// (not thread-safe, no freeing for small allocs yet)
 static uint64_t heap_phys_cur = 0;
 static uint64_t heap_phys_end = 0;
 
@@ -24,60 +21,81 @@ void kmem_init(void) {
   heap_phys_end = 0;
 }
 
-void* kmalloc(size_t size) {
-  if (size == 0) return 0;
+/* ---------------- BIG allocations (page-backed, freeable) ---------------- */
 
-  kprintf("kmalloc: size=%u\n", (unsigned)size);
-  const uint64_t hdr_sz = align_up_u64(sizeof(KAllocHdr), 16);
-  const uint64_t total  = (uint64_t)size + hdr_sz;
+#define KMALLOC_BIG_MAGIC 0x4B4D414C554C4C21ull /* "KMALLUL!" (any odd 64b is fine) */
 
-  // Small path: keep original bump style within one page.
-  // We cap to leave space for header and a little slack.
-  const uint64_t small_max = PAGE_SIZE - 32;
-  if (total <= small_max) {
-    if (heap_phys_cur == 0 || align_up_u64(heap_phys_cur, 16) + total > heap_phys_end) {
-      uint64_t page_phys = pmm_alloc_page_phys();
-      if (!page_phys) return 0;
-      heap_phys_cur = page_phys;
-      heap_phys_end = page_phys + PAGE_SIZE;
-    }
+typedef struct __attribute__((packed)) {
+  uint64_t magic;
+  uint32_t pages;
+  uint32_t _pad;
+} KmallocBigHdr; // 16 bytes, so (hdr+1) is still 16B-aligned
 
-    uint64_t cur = align_up_u64(heap_phys_cur, 16);
-    uint64_t next = cur + total;
-    heap_phys_cur = next;
+static void* kmalloc_big(size_t size) {
+  // total includes header, then round to pages
+  uint64_t total = (uint64_t)size + (uint64_t)sizeof(KmallocBigHdr);
+  uint64_t pages = (total + (PAGE_SIZE - 1)) / PAGE_SIZE;
+  if (pages == 0) return 0;
 
-    KAllocHdr *h = (KAllocHdr*)(uintptr_t)cur;
-    h->pages = 0;              // small bump alloc
-    h->size  = (uint64_t)size;
-
-    return (void*)(uintptr_t)(cur + hdr_sz);
-  }
-
-  kprintf("kmalloc BIG: size=%u\n", (unsigned)size);
-  // Big path: allocate contiguous pages
-  uint64_t pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
   uint64_t base_phys = pmm_alloc_contig_pages_phys(pages);
   if (!base_phys) return 0;
 
-  KAllocHdr *h = (KAllocHdr*)(uintptr_t)base_phys;
-  h->pages = pages;
-  h->size  = (uint64_t)size;
+  uint8_t *base = (uint8_t*)phys_to_ptr(base_phys);
 
-  return (void*)(uintptr_t)(base_phys + hdr_sz);
+  KmallocBigHdr *h = (KmallocBigHdr*)base;
+  h->magic = KMALLOC_BIG_MAGIC;
+  h->pages = (uint32_t)pages;
+  h->_pad  = 0;
+
+  // return pointer right after header
+  return (void*)(base + sizeof(KmallocBigHdr));
 }
+
+/* ---------------- kmalloc ---------------- */
+
+void* kmalloc(size_t size) {
+  if (size == 0) return 0;
+
+  // BIG allocation: go to PMM contiguous allocator, and make it freeable
+  if (size > (PAGE_SIZE - 32)) {
+    // optional debug (you already had something similar)
+    // kprintf("kmalloc BIG: size=%u\n", (unsigned)size);
+    return kmalloc_big(size);
+  }
+
+  // SMALL allocation: bump within a single page (no free yet)
+  if (heap_phys_cur == 0 || align_up_u64(heap_phys_cur, 16) + size > heap_phys_end) {
+    uint64_t page_phys = pmm_alloc_page_phys();
+    if (!page_phys) return 0;
+
+    heap_phys_cur = page_phys;
+    heap_phys_end = page_phys + PAGE_SIZE;
+  }
+
+  uint64_t cur  = align_up_u64(heap_phys_cur, 16);
+  uint64_t next = cur + (uint64_t)size;
+
+  heap_phys_cur = next;
+  return phys_to_ptr(cur);
+}
+
+/* ---------------- kfree ---------------- */
 
 void kfree(void *p) {
   if (!p) return;
 
-  const uint64_t hdr_sz = align_up_u64(sizeof(KAllocHdr), 16);
-  uint64_t addr = (uint64_t)(uintptr_t)p;
-  uint64_t hdr_addr = addr - hdr_sz;
+  // try BIG header (p points right after it)
+  uint8_t *u = (uint8_t*)p;
+  KmallocBigHdr *h = (KmallocBigHdr*)(u - sizeof(KmallocBigHdr));
 
-  KAllocHdr *h = (KAllocHdr*)(uintptr_t)hdr_addr;
+  // validate header before freeing (avoid false-positives on small allocs)
+  if (h->magic != KMALLOC_BIG_MAGIC) return;
+  if (h->pages == 0) return;
 
-  // Only free big allocations (contiguous pages). Small bump allocs stay no-op for now.
-  if (h->pages > 0) {
-    uint64_t base_phys = hdr_addr & ~(PAGE_SIZE - 1); // header placed at base
-    pmm_free_contig_pages_phys(base_phys, h->pages);
-  }
+  // base is exactly where header lives, and is page-aligned phys
+  uint8_t *base = (uint8_t*)h;
+  uint64_t base_phys = (uint64_t)(uintptr_t)base; // identity-mapped in your kernel
+  base_phys &= ~(PAGE_SIZE - 1);
+
+  pmm_free_contig_pages_phys(base_phys, (uint64_t)h->pages);
 }

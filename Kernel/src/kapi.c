@@ -5,6 +5,15 @@
 #include <carlos/str.h>
 #include <carlos/path.h>
 
+// kapi.c
+#define KAPI_FS_DEBUG 1
+
+#if KAPI_FS_DEBUG
+  #define KAPI_DBG(...) kprintf(__VA_ARGS__)
+#else
+  #define KAPI_DBG(...) do{}while(0)
+#endif
+
 static Fs *g_kapi_fs = 0;
 
 static char g_kapi_cwd[128] = "/";   // POSIX-ish, "/" or "/BIN"
@@ -63,6 +72,7 @@ static void normalize_abs_path(char *p){
 
   // ensure leading '/'
   out[oi++] = '/';
+  out[oi]   = 0;   // <-- IMPORTANT: makes "/" a valid C string
 
   // read cursor (skip leading seps in input)
   size_t i = 0;
@@ -105,7 +115,7 @@ static void normalize_abs_path(char *p){
   }
 
   // trim trailing slash except root
-  if (oi > 1 && out[oi-1] == '/') out[oi-1] = 0;
+  if (oi > 1 && out[oi-1] == '/') { out[--oi] = 0; }
 
   // copy back
   for (size_t k = 0; k + 1 < sizeof(out); k++) {
@@ -115,67 +125,124 @@ static void normalize_abs_path(char *p){
   p[sizeof(out) - 1] = 0;
 }
 
+static void dbg_show_path(const char *tag, const char *s){
+  if (!s) { KAPI_DBG("kapi: %s = (null)\n", tag); return; }
+  KAPI_DBG("kapi: %s = '%s'\n", tag, s);
+}
+
+static void dbg_show_path_bytes(const char *tag, const char *s){
+  KAPI_DBG("kapi: %s bytes:", tag);
+  if (!s) { KAPI_DBG(" (null)\n"); return; }
+  for (int i = 0; i < 40 && s[i]; i++){
+    unsigned char c = (unsigned char)s[i];
+    KAPI_DBG(" %02x", (unsigned)c);
+  }
+  KAPI_DBG("\n");
+}
+
+static void dbg_show_iter_rc(int rc){
+  if (rc > 0) KAPI_DBG("kapi: iter_next => END rc=%d\n", rc);
+  else if (rc < 0) KAPI_DBG("kapi: iter_next => ERR rc=%d\n", rc);
+}
+
 static s32 api_fs_listdir(const char *path, CarlosDirEnt *ents, u32 max_ents){
   if (!g_kapi_fs || !ents || max_ents == 0) return -1;
+
+  KAPI_DBG("\n--- kapi: fs_listdir ---\n");
+  dbg_show_path("cwd", g_kapi_cwd);
+  dbg_show_path("arg", path);
+  dbg_show_path_bytes("arg", path);
 
   // NULL, "" or "." => cwd
   const char *p = path;
   if (!p || p[0] == 0 || (p[0] == '.' && p[1] == 0)) p = g_kapi_cwd;
+  dbg_show_path("p(after default)", p);
 
-  // Build an *absolute* path into abs[]
-  char abs[256];
-  abs[0] = 0;
+  // Build absolute POSIX-ish path into abs[]
+  char abs[512];
 
-  int is_abs = (p && path_is_sep(p[0])) ? 1 : 0;
+  const int is_abs = (p[0] == '/' || p[0] == '\\');
+  KAPI_DBG("kapi: is_abs=%d\n", is_abs);
 
   if (is_abs) {
-    // copy as-is
     kstrncpy(abs, p, sizeof(abs)-1);
     abs[sizeof(abs)-1] = 0;
   } else {
-    // abs = cwd + "/" + p   (taking care of cwd="/")
-    const char *cwd = g_kapi_cwd[0] ? g_kapi_cwd : "/";
+    const char *cwd = (g_kapi_cwd[0] ? g_kapi_cwd : "/");
     size_t a = kstrlen(cwd);
     size_t b = kstrlen(p);
 
-    // If cwd is "/", don't double slash
     if (a == 1 && cwd[0] == '/') a = 0;
 
-    if (a + 1 + b + 1 > sizeof(abs)) return -2;
+    KAPI_DBG("kapi: join: cwd='%s' (a=%u) + p='%s' (b=%u)\n",
+             cwd, (unsigned)a, p, (unsigned)b);
+
+    if (1 + a + (a ? 1 : 0) + b + 1 > sizeof(abs)) {
+      KAPI_DBG("kapi: join overflow -> -2\n");
+      return -2;
+    }
 
     size_t j = 0;
     abs[j++] = '/';
-    for (size_t i = 0; i < a; i++) abs[j++] = cwd[i];
+
+    for (size_t i = 0; i < a; i++) {
+      char c = cwd[i];
+      if (c == '\\') c = '/';
+      abs[j++] = c;
+    }
     if (a) abs[j++] = '/';
-    for (size_t i = 0; i < b; i++) abs[j++] = p[i];
+
+    for (size_t i = 0; i < b; i++) {
+      char c = p[i];
+      if (c == '\\') c = '/';
+      abs[j++] = c;
+    }
     abs[j] = 0;
   }
 
-  // normalize: handles .. and .
+  dbg_show_path("abs(before norm)", abs);
+
+  // normalize (handles ../ and .)
   normalize_abs_path(abs);
 
-  // FAT expects root-relative with no leading slash
+  dbg_show_path("abs(after norm)", abs);
+
+  // fat16_* wants root-relative without leading slash.
   const char *fatp = abs;
-  while (fatp[0] && path_is_sep(fatp[0])) fatp++;
+  while (fatp[0] == '/' || fatp[0] == '\\') fatp++;
+
+  dbg_show_path("fatp", fatp);
+  dbg_show_path_bytes("fatp", fatp);
 
   FatDirIter it;
-  int rc = 0;
+  int rc;
 
   if (!fatp[0]) {
+    KAPI_DBG("kapi: iter root\n");
     rc = fat16_root_iter_begin(&g_kapi_fs->fat, &it);
+    KAPI_DBG("kapi: root_iter_begin rc=%d\n", rc);
+    if (rc != 0) return rc;
   } else {
     uint16_t clus = 0;
     uint8_t  attr = 0;
     uint32_t size = 0;
 
+    KAPI_DBG("kapi: stat '%s'\n", fatp);
     rc = fat16_stat_path83(&g_kapi_fs->fat, fatp, &clus, &attr, &size);
+    KAPI_DBG("kapi: stat rc=%d clus=%u attr=0x%02x size=%u\n",
+             rc, (unsigned)clus, (unsigned)attr, (unsigned)size);
     if (rc != 0) return rc;
-    if ((attr & 0x10) == 0) return -3; // not a dir
 
+    if ((attr & 0x10) == 0) {
+      KAPI_DBG("kapi: not a dir -> -3\n");
+      return -3;
+    }
+
+    KAPI_DBG("kapi: dir_iter_begin clus=%u\n", (unsigned)clus);
     rc = fat16_dir_iter_begin(&g_kapi_fs->fat, &it, clus);
+    KAPI_DBG("kapi: dir_iter_begin rc=%d\n", rc);
+    if (rc != 0) return rc;
   }
-
-  if (rc != 0) return rc;
 
   u32 n = 0;
   while (n < max_ents) {
@@ -185,10 +252,13 @@ static s32 api_fs_listdir(const char *path, CarlosDirEnt *ents, u32 max_ents){
     uint32_t size = 0;
 
     rc = fat16_dir_iter_next(&it, name83, &attr, &clus, &size);
+    dbg_show_iter_rc(rc);
     if (rc > 0) break;
     if (rc < 0) return rc;
 
-    // skip . and ..
+    KAPI_DBG("kapi: ent name83='%s' attr=0x%02x clus=%u size=%u\n",
+             name83, (unsigned)attr, (unsigned)clus, (unsigned)size);
+
     if (name83[0] == '.' && name83[1] == 0) continue;
     if (name83[0] == '.' && name83[1] == '.' && name83[2] == 0) continue;
 
@@ -200,6 +270,7 @@ static s32 api_fs_listdir(const char *path, CarlosDirEnt *ents, u32 max_ents){
     n++;
   }
 
+  KAPI_DBG("kapi: fs_listdir => n=%u\n", (unsigned)n);
   return (s32)n;
 }
 

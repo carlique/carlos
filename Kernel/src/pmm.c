@@ -18,6 +18,7 @@ extern uint8_t __kernel_end;
 
 #define PAGE_SIZE 4096ULL
 #define EfiConventionalMemory 7
+#define PMM_MIN_ALLOC_PHYS (16ULL * 1024ULL * 1024ULL)   // 16 MiB
 
 typedef struct {
   uint32_t Type;
@@ -135,15 +136,14 @@ void pmm_init(const BootInfo *bi)
     for (uint64_t pg = 0; pg < pages; pg++) {
       uint64_t page_phys = align_down(start + pg * PAGE_SIZE);
 
+      // HARD RESERVE low memory (UEFI often leaves important stuff there even if "Conventional")
+      if (page_phys < PMM_MIN_ALLOC_PHYS)
+        continue;
+
       if (is_reserved_page(page_phys, kernel_lo, kernel_hi, memmap_lo, memmap_hi, bi_lo, bi_hi))
         continue;
 
-      if (page_phys < PAGE_SIZE) continue;
-
-      // RULE: physical page 0 is never placed on the free list.
-      // This keeps 0 as a reliable allocation failure sentinel.
       if (g_free_top < MAX_FREE_PAGES) {
-        if (page_phys == 0) continue;   // RULE: keep phys page 0 reserved forever
         g_free_pages[g_free_top++] = page_phys;
       }
     }
