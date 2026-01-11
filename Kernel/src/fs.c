@@ -1,7 +1,11 @@
+// fs.c
 #include <stdint.h>
 #include <stddef.h>
+
 #include <carlos/fs.h>
 #include <carlos/klog.h>
+#include <carlos/kmem.h>
+
 #include <carlos/part.h>
 #include <carlos/fat16.h>
 #include <carlos/fat16_w.h>   // only fs.c gets write access
@@ -181,14 +185,12 @@ int fs_mount_root(Fs *out, const BootInfo *bi){
       Disk d = (Disk){0};
       int rc = disk_init_ahci(&d, port);
 
-      // IMPORTANT: print *before* continue
       kprintf("FS: port %u disk_init rc=%d sector=%u\n", port, rc, d.sector_size);
       if (rc != 0) continue;
 
       Partition p = (Partition){0};
       rc = part_gpt_find_by_partuuid(&d, uuid, &p);
 
-      // IMPORTANT: print *before* continue
       kprintf("FS: port %u partuuid rc=%d lba=%llu count=%llu\n",
               port, rc, p.lba_start, p.lba_count);
 
@@ -199,11 +201,11 @@ int fs_mount_root(Fs *out, const BootInfo *bi){
       uint8_t bs[512];
       int rrc = disk_read(&d, p.lba_start, 1, bs);
       kprintf("FS: read bs rc=%d sig=%02x%02x at port=%u lba=%llu\n",
-                rrc, bs[510], bs[511], port, (unsigned long long)p.lba_start);
+              rrc, bs[510], bs[511], port, (unsigned long long)p.lba_start);
 
       out->disk = d;
       out->port = port;
-      out->root_part  = p;
+      out->root_part = p;
 
       rc = fat16_mount(&out->fat, &out->disk, p.lba_start);
       kprintf("FS: fat16_mount rc=%d\n", rc);
@@ -218,37 +220,50 @@ int fs_mount_root(Fs *out, const BootInfo *bi){
   return -21;
 }
 
-int fs_read_entire_file(Fs *fs, const char *path,
-                        void *buf, uint32_t cap, uint32_t *out_size)
+// fs_read_file: alloc+read whole file into kmalloc buffer.
+// Caller must kfree(*out_buf).
+int fs_read_file(Fs *fs, const char *path, void **out_buf, uint32_t *out_size)
 {
-  int rc = 0;
-
+  if (out_buf)  *out_buf  = 0;
   if (out_size) *out_size = 0;
-  if (!fs || !path || !buf) return -1;
+  if (!fs || !path || !out_buf || !out_size) return -1;
 
   char p83[256];
   norm_path83(path, p83, sizeof(p83));
 
-  uint8_t  attr = 0;
   uint16_t clus = 0;
+  uint8_t  attr = 0;
   uint32_t size = 0;
 
-  rc = fat16_stat_path83(&fs->fat, p83, &clus, &attr, &size);
+  int rc = fat16_stat_path83(&fs->fat, p83, &clus, &attr, &size);
   if (rc != 0) return rc;
 
   if (attr & FAT_ATTR_DIR) return -2;
-  if (size > cap) return -3;
+
+  if (size == 0) {
+    *out_buf = 0;
+    *out_size = 0;
+    return 0;
+  }
+
+  void *buf = kmalloc(size);
+  if (!buf) return -3;
 
   rc = fat16_read_file_by_clus(&fs->fat, clus, 0, size, buf);
-  if (rc != 0) return rc;
+  if (rc != 0) {
+    kfree(buf);
+    return rc;
+  }
 
-  if (out_size) *out_size = size;
+  *out_buf = buf;
+  *out_size = size;
   return 0;
 }
 
-int fs_read_file(Fs *fs, const char *path,
-                 uint32_t offset, void *buf, uint32_t len,
-                 uint32_t *out_read)
+// fs_read_file_at: read into caller buffer (no alloc).
+int fs_read_file_at(Fs *fs, const char *path,
+                    uint32_t offset, void *buf, uint32_t len,
+                    uint32_t *out_read)
 {
   if (out_read) *out_read = 0;
   if (!fs || !path || !buf) return -1;
@@ -284,5 +299,6 @@ int fs_mkdir(Fs *fs, const char *path)
   char p83[256];
   norm_path83(path, p83, sizeof(p83));
 
+  // write API is only visible via fat16_w.h
   return fat16_mkdir_path83(&fs->fat, p83);
 }

@@ -3,11 +3,18 @@
 #include <stddef.h>
 
 #include <carlos/exec.h>
+#include <carlos/fs.h>
 #include <carlos/klog.h>
 #include <carlos/kmem.h>
 #include <carlos/kapi.h>   // g_api
-#include <carlos/fat16.h>
-#include <carlos/pmm.h>
+#include <carlos/pmm.h>    // optional: pmm_free_count() for debug prints
+
+// exec.c logging (runtime controlled by g_klog_level + g_klog_mask)
+#define EXEC_TRACE(...) KLOG(KLOG_MOD_EXEC, KLOG_TRACE, __VA_ARGS__)
+#define EXEC_DBG(...)   KLOG(KLOG_MOD_EXEC, KLOG_DBG,   __VA_ARGS__)
+#define EXEC_INFO(...)  KLOG(KLOG_MOD_EXEC, KLOG_INFO,  __VA_ARGS__)
+#define EXEC_WARN(...)  KLOG(KLOG_MOD_EXEC, KLOG_WARN,  __VA_ARGS__)
+#define EXEC_ERR(...)   KLOG(KLOG_MOD_EXEC, KLOG_ERR,   __VA_ARGS__)
 
 uint64_t g_exec_saved_rsp = 0;
 int      g_exec_exit_code = 0;
@@ -17,42 +24,6 @@ extern void kapi_set_cwd(const char *cwd);
 // exec_s.S
 int  exec_enter(void *entry, void *stack_top, void *api, int argc, char **argv);
 void carlos_kexit(int code);
-
-// Reads whole file into kmalloc buffer
-static int read_entire(Fs *fs, const char *path, void **out_buf, uint32_t *out_size){
-  if (!fs || !path || !out_buf || !out_size) return -1;
-  *out_buf = 0; *out_size = 0;
-
-  const char *p = path;
-  if (p[0] == '/' || p[0] == '\\') p++;
-
-  uint16_t clus = 0;
-  uint8_t  attr = 0;
-  uint32_t size = 0;
-
-  int rc = fat16_stat_path83(&fs->fat, p, &clus, &attr, &size);
-  if (rc != 0) return rc;
-  if (attr & 0x10) return -2;
-
-  kprintf("exec: want file size=%u bytes (pmm_free=%llu)\n",
-          (unsigned)size, (unsigned long long)pmm_free_count());
-
-  if (size == 0) { *out_buf = 0; *out_size = 0; return 0; }
-  
-  void *buf = kmalloc(size);
-  kprintf("exec: kmalloc(%u) -> %p\n", (unsigned)size, buf);
-  if (!buf) return -3;
-
-  rc = fat16_read_file_by_clus(&fs->fat, clus, 0, size, buf);
-  if (rc != 0) {
-    kfree(buf);
-    return rc;
-  }
-
-  *out_buf = buf;
-  *out_size = size;
-  return 0;
-}
 
 int exec_run_path(Fs *fs, const char *path, int argc, char **argv, const char *cwd)
 {
@@ -66,33 +37,46 @@ int exec_run_path(Fs *fs, const char *path, int argc, char **argv, const char *c
 
   if (!fs || !path) return -1;
 
-  rc = read_entire(fs, path, &file, &file_sz);
+  // One-call load (alloc + read) owned by FS layer
+  rc = fs_read_file(fs, path, &file, &file_sz);
   if (rc != 0) {
-    kprintf("exec: read failed rc=%d path=%s\n", rc, path);
+    EXEC_ERR("exec: fs_read_file rc=%d path=%s\n", rc, path);
     return rc;
+  }
+
+  EXEC_DBG("exec: loaded %s size=%u (pmm_free=%llu) buf=%p\n",
+           path, (unsigned)file_sz,
+           (unsigned long long)pmm_free_count(),
+           file);
+
+  if (file_sz == 0 || !file) {
+    // treat empty as error for exec
+    if (file) kfree(file);
+    return -2;
   }
 
   rc = exec_elf_load_pie(file, (size_t)file_sz, &img);
 
-  // file buffer is no longer needed after load attempt
+  // File buffer is no longer needed after load attempt
   kfree(file);
   file = 0;
+  file_sz = 0;
 
   if (rc != 0) {
-    kprintf("exec: elf_load rc=%d path=%s\n", rc, path);
+    EXEC_ERR("exec: elf_load rc=%d path=%s\n", rc, path);
     // img is guaranteed empty on failure with current exec_elf_load_pie()
     return rc;
   }
 
-  stk = (uint8_t*)kmalloc(64*1024);
+  stk = (uint8_t*)kmalloc(64 * 1024);
   if (!stk) { rc = -4; goto cleanup; }
 
-  kprintf("exec: %s base=%p entry=%p\n", path, img.base, img.entry);
+  EXEC_INFO("exec: %s base=%p entry=%p\n", path, img.base, img.entry);
 
   kapi_set_cwd(cwd);
-  code = exec_enter(img.entry, stk + 64*1024, (void*)&g_api, argc, argv);
+  code = exec_enter(img.entry, stk + 64 * 1024, (void*)&g_api, argc, argv);
 
-  kprintf("\n[app exit %d]\n", code);
+  EXEC_INFO("\n[app exit %d]\n", code);
 
 cleanup:
   if (stk) kfree(stk);
