@@ -42,7 +42,10 @@ static int read_entire(Fs *fs, const char *path, void **out_buf, uint32_t *out_s
   if (!buf) return -3;
 
   rc = fat16_read_file_by_clus(&fs->fat, clus, 0, size, buf);
-  if (rc != 0) return rc;
+  if (rc != 0) {
+    kfree(buf);
+    return rc;
+  }
 
   *out_buf = buf;
   *out_size = size;
@@ -51,32 +54,48 @@ static int read_entire(Fs *fs, const char *path, void **out_buf, uint32_t *out_s
 
 int exec_run_path(Fs *fs, const char *path, int argc, char **argv, const char *cwd)
 {
-  if (!fs || !path) return -1;
+  int rc = 0;
+  int code = 0;
 
   void *file = 0;
   uint32_t file_sz = 0;
+  ExecImage img = (ExecImage){0};
+  uint8_t *stk = 0;
 
-  int rc = read_entire(fs, path, &file, &file_sz);
+  if (!fs || !path) return -1;
+
+  rc = read_entire(fs, path, &file, &file_sz);
   if (rc != 0) {
     kprintf("exec: read failed rc=%d path=%s\n", rc, path);
     return rc;
   }
 
-  ExecImage img;
   rc = exec_elf_load_pie(file, (size_t)file_sz, &img);
+
+  // file buffer is no longer needed after load attempt
+  kfree(file);
+  file = 0;
+
   if (rc != 0) {
     kprintf("exec: elf_load rc=%d path=%s\n", rc, path);
+    // img is guaranteed empty on failure with current exec_elf_load_pie()
     return rc;
   }
 
-  uint8_t *stk = (uint8_t*)kmalloc(64*1024);
-  if (!stk) return -4;
+  stk = (uint8_t*)kmalloc(64*1024);
+  if (!stk) { rc = -4; goto cleanup; }
 
   kprintf("exec: %s base=%p entry=%p\n", path, img.base, img.entry);
 
-  kapi_set_cwd(cwd);          // make syscalls relative-aware
-  int code = exec_enter(img.entry, stk + 64*1024, (void*)&g_api, argc, argv);
+  kapi_set_cwd(cwd);
+  code = exec_enter(img.entry, stk + 64*1024, (void*)&g_api, argc, argv);
 
   kprintf("\n[app exit %d]\n", code);
+
+cleanup:
+  if (stk) kfree(stk);
+  if (img.raw) kfree(img.raw);
+
+  if (rc != 0) return rc;
   return code;
 }

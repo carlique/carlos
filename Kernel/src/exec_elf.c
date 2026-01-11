@@ -70,17 +70,19 @@ static void *kmem_align_up(void *p, uint64_t align){
 
 int exec_elf_load_pie(const void *file, size_t file_sz, ExecImage *out)
 {
+  int rc = 0;
+  void *raw = 0;
+
   if (!file || file_sz < sizeof(Elf64_Ehdr) || !out) return -1;
   *out = (ExecImage){0};
 
   const Elf64_Ehdr *eh = (const Elf64_Ehdr*)file;
 
   if (eh->e_ident[0] != 0x7F || eh->e_ident[1] != 'E' || eh->e_ident[2] != 'L' || eh->e_ident[3] != 'F') return -11;
-  if (eh->e_ident[4] != 2) return -12; // 64-bit
-  if (eh->e_ident[5] != 1) return -13; // little
+  if (eh->e_ident[4] != 2) return -12;
+  if (eh->e_ident[5] != 1) return -13;
   if (eh->e_machine != EM_X86_64) return -14;
-
-  if (eh->e_type != ET_DYN) return -15; // PIE only
+  if (eh->e_type != ET_DYN) return -15;
 
   if (eh->e_phoff == 0 || eh->e_phnum == 0) return -16;
   if (eh->e_phentsize != sizeof(Elf64_Phdr)) return -17;
@@ -106,27 +108,25 @@ int exec_elf_load_pie(const void *file, size_t file_sz, ExecImage *out)
 
   uint64_t img_sz = maxv - minv;
 
-  void *raw = kmalloc((size_t)img_sz + 0x1000);
+  raw = kmalloc((size_t)img_sz + 0x1000);
   if (!raw) return -21;
 
   uint8_t *base = (uint8_t*)kmem_align_up(raw, 0x1000);
   memclr(base, (size_t)img_sz);
 
-  // load segments
   for (uint16_t i = 0; i < eh->e_phnum; i++){
     if (ph[i].p_type != PT_LOAD) continue;
     if (ph[i].p_filesz == 0) continue;
 
     uint64_t dst_off = ph[i].p_vaddr - minv;
-    if (dst_off + ph[i].p_filesz > img_sz) return -22;
+    if (dst_off + ph[i].p_filesz > img_sz) { rc = -22; goto fail; }
 
     memcp(base + dst_off, (const uint8_t*)file + ph[i].p_offset, (size_t)ph[i].p_filesz);
   }
 
-  // relocations: RELA + R_X86_64_RELATIVE only
   if (dyn_ph) {
     uint64_t dyn_off = dyn_ph->p_vaddr - minv;
-    if (dyn_off + dyn_ph->p_memsz > img_sz) return -23;
+    if (dyn_off + dyn_ph->p_memsz > img_sz) { rc = -23; goto fail; }
 
     Elf64_Dyn *dyn = (Elf64_Dyn*)(base + dyn_off);
 
@@ -138,10 +138,10 @@ int exec_elf_load_pie(const void *file, size_t file_sz, ExecImage *out)
     }
 
     if (rela_v && rela_sz) {
-      if (rela_ent != sizeof(Elf64_Rela)) return -24;
+      if (rela_ent != sizeof(Elf64_Rela)) { rc = -24; goto fail; }
 
       uint64_t rela_off = rela_v - minv;
-      if (rela_off + rela_sz > img_sz) return -25;
+      if (rela_off + rela_sz > img_sz) { rc = -25; goto fail; }
 
       Elf64_Rela *r = (Elf64_Rela*)(base + rela_off);
       uint64_t n = rela_sz / sizeof(Elf64_Rela);
@@ -150,7 +150,7 @@ int exec_elf_load_pie(const void *file, size_t file_sz, ExecImage *out)
         if (ELF64_R_TYPE(r[i].r_info) != R_X86_64_RELATIVE) continue;
 
         uint64_t off = r[i].r_offset - minv;
-        if (off + 8 > img_sz) return -26;
+        if (off + 8 > img_sz) { rc = -26; goto fail; }
 
         *(uint64_t*)(base + off) =
           (uint64_t)(uintptr_t)(base + (uint64_t)r[i].r_addend);
@@ -159,11 +159,15 @@ int exec_elf_load_pie(const void *file, size_t file_sz, ExecImage *out)
   }
 
   uint64_t entry_off = eh->e_entry - minv;
-  if (entry_off >= img_sz) return -27;
+  if (entry_off >= img_sz) { rc = -27; goto fail; }
 
-  out->raw   = raw;                 // for future freeing if you implement kfree
+  out->raw   = raw;
   out->base  = base;
   out->size  = img_sz;
   out->entry = (void*)(base + entry_off);
   return 0;
+
+fail:
+  if (raw) kfree(raw);
+  return rc;
 }

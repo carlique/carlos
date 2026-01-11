@@ -28,11 +28,12 @@ void kmem_init(void) {
 typedef struct __attribute__((packed)) {
   uint64_t magic;
   uint32_t pages;
-  uint32_t _pad;
-} KmallocBigHdr; // 16 bytes, so (hdr+1) is still 16B-aligned
+  uint32_t _pad0;
+  uint64_t base_phys;   // page-aligned physical base returned by PMM
+  uint64_t _pad1;       // keep header 32B
+} KmallocBigHdr;
 
 static void* kmalloc_big(size_t size) {
-  // total includes header, then round to pages
   uint64_t total = (uint64_t)size + (uint64_t)sizeof(KmallocBigHdr);
   uint64_t pages = (total + (PAGE_SIZE - 1)) / PAGE_SIZE;
   if (pages == 0) return 0;
@@ -43,11 +44,12 @@ static void* kmalloc_big(size_t size) {
   uint8_t *base = (uint8_t*)phys_to_ptr(base_phys);
 
   KmallocBigHdr *h = (KmallocBigHdr*)base;
-  h->magic = KMALLOC_BIG_MAGIC;
-  h->pages = (uint32_t)pages;
-  h->_pad  = 0;
+  h->magic    = KMALLOC_BIG_MAGIC;
+  h->pages    = (uint32_t)pages;
+  h->_pad0    = 0;
+  h->base_phys= base_phys;
+  h->_pad1    = 0;
 
-  // return pointer right after header
   return (void*)(base + sizeof(KmallocBigHdr));
 }
 
@@ -84,18 +86,12 @@ void* kmalloc(size_t size) {
 void kfree(void *p) {
   if (!p) return;
 
-  // try BIG header (p points right after it)
   uint8_t *u = (uint8_t*)p;
   KmallocBigHdr *h = (KmallocBigHdr*)(u - sizeof(KmallocBigHdr));
 
-  // validate header before freeing (avoid false-positives on small allocs)
   if (h->magic != KMALLOC_BIG_MAGIC) return;
   if (h->pages == 0) return;
+  if (h->base_phys == 0) return;
 
-  // base is exactly where header lives, and is page-aligned phys
-  uint8_t *base = (uint8_t*)h;
-  uint64_t base_phys = (uint64_t)(uintptr_t)base; // identity-mapped in your kernel
-  base_phys &= ~(PAGE_SIZE - 1);
-
-  pmm_free_contig_pages_phys(base_phys, (uint64_t)h->pages);
+  pmm_free_contig_pages_phys(h->base_phys, (uint64_t)h->pages);
 }

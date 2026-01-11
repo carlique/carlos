@@ -208,9 +208,44 @@ uint64_t pmm_alloc_contig_pages_phys(uint64_t pages)
 void pmm_free_contig_pages_phys(uint64_t base_phys, uint64_t pages)
 {
   if (!base_phys || pages == 0) return;
-  base_phys &= ~(PAGE_SIZE - 1);
 
-  for (uint64_t i = 0; i < pages; i++){
-    pmm_free_page_phys(base_phys + i * PAGE_SIZE);
+  // must be page-aligned
+  if (base_phys & (PAGE_SIZE - 1)) {
+    PMM_LOG("pmm: free_contig bad align base=0x%llx\n", (unsigned long long)base_phys);
+    return;
   }
+
+  // Insert each page back into g_free_pages[] keeping it sorted.
+  for (uint64_t i = 0; i < pages; i++) {
+    uint64_t phys = base_phys + i * PAGE_SIZE;
+
+    // find insertion point (linear is fine for now)
+    uint64_t pos = 0;
+    while (pos < g_free_top && g_free_pages[pos] < phys) pos++;
+
+    // optional: avoid double-free duplicates
+    if (pos < g_free_top && g_free_pages[pos] == phys) {
+      PMM_LOG("pmm: free_contig duplicate phys=0x%llx\n", (unsigned long long)phys);
+      continue;
+    }
+
+    // capacity check (whatever your max is)
+    if (g_free_top >= MAX_FREE_PAGES) {
+      PMM_LOG("pmm: free_contig overflow\n");
+      return;
+    }
+
+    // shift right to make room
+    for (uint64_t k = g_free_top; k > pos; k--) {
+      g_free_pages[k] = g_free_pages[k - 1];
+    }
+
+    g_free_pages[pos] = phys;
+    g_free_top++;
+  }
+
+  PMM_LOG("pmm: free_contig base=0x%llx pages=%llu free=%llu\n",
+          (unsigned long long)base_phys,
+          (unsigned long long)pages,
+          (unsigned long long)g_free_top);
 }
