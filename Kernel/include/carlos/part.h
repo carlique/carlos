@@ -10,8 +10,8 @@ typedef struct Partition {
 } Partition;
 
 // MBR
-int part_mbr_get(const Disk *d, int index, Partition *out);
-int part_find_fat_candidate(const Disk *d, Partition *out);
+int part_mbr_get(Disk *d, int index, Partition *out);
+int part_find_fat_candidate(Disk *d, Partition *out);
 
 // GPT: find partition by PARTUUID (GPT Partition GUID)
-int part_gpt_find_by_partuuid(const Disk *d, const char *uuid_str, Partition *out);
+int part_gpt_find_by_partuuid(Disk *d, const char *uuid_str, Partition *out);

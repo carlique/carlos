@@ -131,7 +131,7 @@ static int guid_eq(const Guid *a, const Guid *b){
   return 1;
 }
 
-int part_gpt_find_by_partuuid(const Disk *d, const char *uuid_str, Partition *out){
+int part_gpt_find_by_partuuid(Disk *d, const char *uuid_str, Partition *out){
   if (!d || !uuid_str || !out) return -1;
   if (d->sector_size != 512) return -2;
 

@@ -18,7 +18,7 @@ typedef struct __attribute__((packed)) {
   uint32_t lba_count;
 } MbrEntry;
 
-int part_mbr_get(const struct Disk *d, int index, Partition *out){
+int part_mbr_get(Disk *d, int index, Partition *out){
   if (!d || !out || index < 0 || index > 3) return -1;
 
   uint8_t sec[512];
@@ -50,7 +50,7 @@ static int is_fat_candidate(uint8_t type){
   }
 }
 
-int part_find_fat_candidate(const struct Disk *d, Partition *out){
+int part_find_fat_candidate(Disk *d, Partition *out){
   if (!d || !out) return -1;
 
   for (int i = 0; i < 4; i++){
