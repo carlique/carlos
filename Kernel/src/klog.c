@@ -8,6 +8,45 @@
 
 static int fb_enabled = 0;
 
+volatile uint8_t  g_klog_level = KLOG_INFO;
+volatile uint32_t g_klog_mask  = KLOG_MOD_ALL;
+
+#define KLOG_RING 1
+#define KLOG_RING_SIZE 8192
+
+#if KLOG_RING
+static char g_klog_ring[KLOG_RING_SIZE];
+static uint32_t g_klog_ring_head = 0;
+static uint8_t  g_klog_ring_full = 0;
+
+static void ring_putc(char c) {
+  g_klog_ring[g_klog_ring_head++] = c;
+  if (g_klog_ring_head >= KLOG_RING_SIZE) {
+    g_klog_ring_head = 0;
+    g_klog_ring_full = 1;
+  }
+}
+
+// dump ring via kputc 
+// TODO: later wire to shell command "dmesg"
+void klog_ring_dump(void) {
+  if (!g_klog_ring_full) {
+    for (uint32_t i = 0; i < g_klog_ring_head; i++) kputc(g_klog_ring[i]);
+    return;
+  }
+  for (uint32_t i = g_klog_ring_head; i < KLOG_RING_SIZE; i++) kputc(g_klog_ring[i]);
+  for (uint32_t i = 0; i < g_klog_ring_head; i++) kputc(g_klog_ring[i]);
+}
+#endif
+
+__attribute__((noreturn))
+void kpanic_impl(const char *file, int line, const char *msg) {
+  kprintf("\nPANIC %s:%d: %s\n", file, line, msg ? msg : "(null)");
+  for (;;) {
+    __asm__ volatile ("cli; hlt");
+  }
+}
+
 void klog_enable_fb(const BootInfo *bi) {
   if (!bi || bi->fb_base == 0) return;
   fbcon_init(bi->fb_base, bi->fb_size, 
@@ -16,6 +55,9 @@ void klog_enable_fb(const BootInfo *bi) {
 }
 
 static void sink_putc(char c) {
+#if KLOG_RING
+  ring_putc(c);
+#endif
   uart_putc(c);
   if (fb_enabled) fbcon_putc(c);
 }

@@ -37,6 +37,8 @@ static int read_entire(Fs *fs, const char *path, void **out_buf, uint32_t *out_s
   kprintf("exec: want file size=%u bytes (pmm_free=%llu)\n",
           (unsigned)size, (unsigned long long)pmm_free_count());
 
+  if (size == 0) { *out_buf = 0; *out_size = 0; return 0; }
+  
   void *buf = kmalloc(size);
   kprintf("exec: kmalloc(%u) -> %p\n", (unsigned)size, buf);
   if (!buf) return -3;

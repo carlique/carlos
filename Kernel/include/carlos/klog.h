@@ -3,6 +3,45 @@
 #include <stddef.h>
 #include <carlos/boot/bootinfo.h>
 
+typedef enum {
+  KLOG_ERR  = 0,
+  KLOG_WARN = 1,
+  KLOG_INFO = 2,
+  KLOG_DBG  = 3,
+  KLOG_TRACE= 4
+} KLogLevel;
+
+// runtime controls
+extern volatile uint8_t  g_klog_level;
+extern volatile uint32_t g_klog_mask;
+
+// module bits (pick what you want, example)
+enum {
+  KLOG_MOD_CORE = 1u<<0,
+  KLOG_MOD_PMM  = 1u<<1,
+  KLOG_MOD_KMEM = 1u<<2,
+  KLOG_MOD_EXEC = 1u<<3,
+  KLOG_MOD_FAT  = 1u<<4,
+  KLOG_MOD_FS   = 1u<<5,
+  KLOG_MOD_KAPI = 1u<<6,
+  KLOG_MOD_SHELL= 1u<<7,
+  KLOG_MOD_ALL  = 0xFFFFFFFFu
+};
+
+#define KLOG(mod, lvl, ...) \
+  do { \
+    if ((uint8_t)(lvl) <= g_klog_level && (g_klog_mask & (uint32_t)(mod))) { \
+      kprintf(__VA_ARGS__); \
+    } \
+  } while(0)
+
+// panic/assert
+__attribute__((noreturn))
+void kpanic_impl(const char *file, int line, const char *msg);
+
+#define KPANIC(msg) kpanic_impl(__FILE__, __LINE__, (msg))
+#define KASSERT(x) do { if (!(x)) kpanic_impl(__FILE__, __LINE__, "assert: " #x); } while(0)
+
 void klog_enable_fb(const BootInfo *bi);
 
 void klog_init(void);
