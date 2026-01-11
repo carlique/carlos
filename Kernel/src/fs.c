@@ -353,3 +353,23 @@ int fs_listdir(Fs *fs, const char *path, fs_listdir_cb cb, void *ud)
 
   return n;
 }
+
+int fs_stat(Fs *fs, const char *path, FsStat *st)
+{
+  if (st) *st = (FsStat){0};
+  if (!fs || !path || !st) return -1;
+
+  char p83[256];
+  norm_path83(path, p83, sizeof(p83));
+
+  uint16_t clus = 0;
+  uint8_t  attr = 0;
+  uint32_t size = 0;
+
+  int rc = fat16_stat_path83(&fs->fat, p83, &clus, &attr, &size);
+  if (rc != 0) return rc;
+
+  st->size = size;
+  st->type = (attr & FAT_ATTR_DIR) ? FS_TYPE_DIR : FS_TYPE_FILE;
+  return 0;
+}

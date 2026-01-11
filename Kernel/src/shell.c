@@ -227,16 +227,11 @@ static void cmd_cd(const char *arg){
   path_join(cand, sizeof(cand), g_cwd, arg);
   path_normalize_abs(cand, sizeof(cand));
 
-  // check it exists and is a dir
-  uint16_t clus = 0;
-  uint8_t  attr = 0;
-  uint32_t size = 0;
-  int rc = fat16_stat_path83(&g_fs->fat, cand, &clus, &attr, &size);
+  FsStat st;
+  int rc = fs_stat(g_fs, cand, &st);
   if (rc != 0) { kprintf("cd: not found: %s\n", cand); return; }
-  if ((attr & 0x10) == 0) { kprintf("cd: not a directory: %s\n", cand); return; }
+  if (st.type != FS_TYPE_DIR) { kprintf("cd: not a directory: %s\n", cand); return; }
 
-  // accept
-  // (cand is already normalized; also ok if it's "/")
   kstrncpy(g_cwd, cand, sizeof(g_cwd)-1);
   g_cwd[sizeof(g_cwd)-1] = 0;
 }
