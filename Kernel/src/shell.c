@@ -303,8 +303,12 @@ static void cmd_time(void){
 static void cmd_sleep(const char *arg){
   uint64_t ms = parse_u64(arg);
   kprintf("sleep %llu ms...\n", ms);
+  uint64_t t0 = g_ticks_ms;
   time_sleep_ms(ms);
-  kprintf("done\n");
+  uint64_t t1 = g_ticks_ms;
+  kprintf("sleep done: t1=%llu delta=%llu\n",
+          (unsigned long long)t1,
+          (unsigned long long)(t1 - t0));
 }
 
 static void cmd_lspci(void){

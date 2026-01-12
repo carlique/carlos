@@ -34,11 +34,11 @@ void isr_common_handler(IsrFrame *f)
   }
 
    // For TESTING: allow returning from “safe-ish” traps
-  if (f->vector == 3 || f->vector == 6) {
-    kprintf("ISR: returning from vector %llu\n", f->vector);
-    __asm__ volatile ("sti");
-    return;
-  }
+  //if (f->vector == 3 || f->vector == 6) {
+  //  kprintf("ISR: returning from vector %llu\n", f->vector);
+  //  __asm__ volatile ("sti");
+  //  return;
+  //}
 
   kprintf("HALT.\n");
   halt_forever();

@@ -38,6 +38,8 @@ enum {
   KLOG_MOD_SHELL= 1u<<7,
   KLOG_MOD_DISK = 1u<<8,
   KLOG_MOD_AHCI = 1u<<9,
+  KLOG_MOD_INTR = 1u<<10,
+  KLOG_MOD_PIC  = 1u<<11,
   KLOG_MOD_ALL  = 0xFFFFFFFFu
 };
 

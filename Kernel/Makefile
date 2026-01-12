@@ -32,7 +32,8 @@ SRCS_C := \
   src/kbd.c src/fbcon.c src/kapi.c src/acpi.c src/idt.c src/isr.c src/gdt.c \
   src/hpet.c src/time.c src/pci.c src/ahci.c \
   src/fs.c src/fat16.c src/part.c src/disk.c src/disk_ahci.c src/path.c \
-  src/mem.c src/ls.c src/part_gpt.c src/mkdir.c src/exec.c src/exec_elf.c
+  src/mem.c src/ls.c src/part_gpt.c src/mkdir.c src/exec.c src/exec_elf.c \
+  src/intr.c src/pic.c src/irq.c src/pit.c
 
 # Only entry.S goes through the generic %.S -> %.o rule
 SRCS_S := src/entry.S src/exec_s.S
@@ -40,8 +41,8 @@ SRCS_S := src/entry.S src/exec_s.S
 OBJS_C := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS_C))
 OBJS_S := $(patsubst src/%.S,$(BUILD)/%.o,$(SRCS_S))
 
-# Special-case isr.S to avoid clashing with isr.c
-OBJS   := $(OBJS_C) $(OBJS_S) $(BUILD)/isr_s.o
+# and special-case it like isr.S if you also have irq.c:
+OBJS   := $(OBJS_C) $(OBJS_S) $(BUILD)/isr_s.o $(BUILD)/irq_s.o
 
 # ---- Generic compile rules ----
 $(BUILD)/%.o: src/%.c | $(BUILD)
@@ -52,6 +53,9 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 
 # Special-case rule
 $(BUILD)/isr_s.o: src/isr.S | $(BUILD)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/irq_s.o: src/irq.S | $(BUILD)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(BUILD)/fs.o: CFLAGS += -DCARLOS_FS_INTERNAL=1
