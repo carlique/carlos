@@ -5,6 +5,17 @@
 #include <carlos/boot/bootinfo.h>
 #include <carlos/klog.h>
 
+#define ACPI_MOD KLOG_MOD_CORE
+
+// Levels:
+// - high-level success/failure => INFO/WARN/ERR
+// - table listings and MADT dump => DBG/TRACE
+#define ACPI_INFO(...)  KLOG(ACPI_MOD, KLOG_INFO,  __VA_ARGS__)
+#define ACPI_WARN(...)  KLOG(ACPI_MOD, KLOG_WARN,  __VA_ARGS__)
+#define ACPI_ERR(...)   KLOG(ACPI_MOD, KLOG_ERR,   __VA_ARGS__)
+#define ACPI_DBG(...)   KLOG(ACPI_MOD, KLOG_DBG,   __VA_ARGS__)
+#define ACPI_TRACE(...) KLOG(ACPI_MOD, KLOG_TRACE, __VA_ARGS__)
+
 static const AcpiSdtHeader *g_rsdt = 0;
 static const uint32_t      *g_rsdt_ent = 0;
 static uint32_t             g_rsdt_count = 0;
@@ -19,6 +30,7 @@ static int sig4_eq(const char s[4], const char *lit){
 }
 
 static void print_sig4(const char s[4]){
+  // Only used in error paths; keep as kprintf since it writes to current log sink.
   kprintf("%c%c%c%c", s[0], s[1], s[2], s[3]);
 }
 
@@ -44,11 +56,12 @@ static void khex_u16(uint16_t v){
 }
 
 static void madt_dump(const AcpiMadt *madt){
-  kprintf("ACPI: MADT @ %p len=%u LAPIC=0x", (void*)madt, madt->Hdr.Length);
+  // MADT dump is verbose; keep at DBG/TRACE
+  ACPI_DBG("acpi: MADT @ %p len=%u LAPIC=0x", (void*)madt, madt->Hdr.Length);
   khex_u32(madt->LapicAddress);
-  kprintf(" flags=0x");
+  ACPI_DBG(" flags=0x");
   khex_u32(madt->Flags);
-  kprintf("\n");
+  ACPI_DBG("\n");
 
   const uint8_t *p = madt->Entries;
   const uint8_t *end = ((const uint8_t*)madt) + madt->Hdr.Length;
@@ -61,38 +74,37 @@ static void madt_dump(const AcpiMadt *madt){
     switch (h->Type) {
       case 0: {
         const AcpiMadtLocalApic *e = (const AcpiMadtLocalApic*)p;
-  
-        kprintf("  MADT: LAPIC cpu=%u apic=%u flags=0x", e->AcpiProcessorId, e->ApicId);
+        ACPI_TRACE("  MADT: LAPIC cpu=%u apic=%u flags=0x",
+                   e->AcpiProcessorId, e->ApicId);
         khex_u32(e->Flags);
-        kprintf(" %s\n", (e->Flags & 1) ? "EN" : "DIS");
+        ACPI_TRACE(" %s\n", (e->Flags & 1) ? "EN" : "DIS");
         break;
       }
       case 1: {
         const AcpiMadtIoApic *e = (const AcpiMadtIoApic*)p;
-        
-        kprintf("  MADT: IOAPIC id=%u addr=0x", e->IoApicId);
+        ACPI_TRACE("  MADT: IOAPIC id=%u addr=0x", e->IoApicId);
         khex_u32(e->IoApicAddress);
-        kprintf(" gsi_base=0x");
+        ACPI_TRACE(" gsi_base=0x");
         khex_u32(e->GlobalSystemInterruptBase);
-        kprintf("\n");
+        ACPI_TRACE("\n");
         break;
       }
       case 2: {
-         const AcpiMadtIso *e = (const AcpiMadtIso*)p;
-  
-        kprintf("  MADT: ISO bus=%u irq=%u -> gsi=%u flags=0x",
-                e->Bus, e->SourceIrq, e->Gsi);
+        const AcpiMadtIso *e = (const AcpiMadtIso*)p;
+        ACPI_TRACE("  MADT: ISO bus=%u irq=%u -> gsi=%u flags=0x",
+                   e->Bus, e->SourceIrq, e->Gsi);
         khex_u16(e->Flags);
-        kprintf("\n");
+        ACPI_TRACE("\n");
         break;
       }
       case 5: {
         const AcpiMadtLapicAddrOverride *e = (const AcpiMadtLapicAddrOverride*)p;
-        kprintf("  MADT: LAPIC_ADDR_OVERRIDE = 0x%llx\n", (uint64_t)e->LapicAddress);
-        break;  
+        ACPI_TRACE("  MADT: LAPIC_ADDR_OVERRIDE = 0x%llx\n",
+                   (uint64_t)e->LapicAddress);
+        break;
       }
       default:
-        kprintf("  MADT: type=%u len=%u (ignored)\n", h->Type, h->Length);
+        ACPI_TRACE("  MADT: type=%u len=%u (ignored)\n", h->Type, h->Length);
         break;
     }
 
@@ -108,7 +120,6 @@ const AcpiSdtHeader* acpi_find_sdt(const char sig4[4]){
     const AcpiSdtHeader *h = phys_to_cptr(phys);
 
     if (sig4_eq(h->Signature, sig4)) {
-      // Optional safety: basic length + checksum
       if (h->Length < sizeof(AcpiSdtHeader)) continue;
       if (!checksum_ok(h, h->Length)) continue;
       return h;
@@ -120,49 +131,51 @@ const AcpiSdtHeader* acpi_find_sdt(const char sig4[4]){
 
 void acpi_probe(const BootInfo *bi){
   if (!bi || !bi->acpi_rsdp){
-    kprintf("ACPI: no RSDP\n");
+    ACPI_WARN("acpi: no RSDP\n");
     return;
   }
 
   const AcpiRsdpV1 *rsdp = phys_to_cptr(bi->acpi_rsdp);
 
-  kprintf("ACPI: RSDP=0x%llx guid_kind=%u rsdp_rev=%u\n",
-        bi->acpi_rsdp, bi->acpi_guid_kind, rsdp->Revision);
+  ACPI_INFO("acpi: RSDP=0x%llx guid_kind=%u rsdp_rev=%u\n",
+            (unsigned long long)bi->acpi_rsdp,
+            (unsigned)bi->acpi_guid_kind,
+            (unsigned)rsdp->Revision);
 
   if (!sig8_eq(rsdp->Signature, "RSD PTR ")){
-    kprintf("ACPI: bad RSDP signature\n");
+    ACPI_ERR("acpi: bad RSDP signature\n");
     return;
   }
 
   // ACPI 1.0 checksum covers first 20 bytes
   if (!checksum_ok(rsdp, 20)){
-    kprintf("ACPI: RSDP checksum FAIL\n");
+    ACPI_ERR("acpi: RSDP checksum FAIL\n");
     return;
   }
 
   if (rsdp->Revision != 0){
-    kprintf("ACPI: RSDP is v2+; add XSDT path later\n");
+    ACPI_WARN("acpi: RSDP is v2+; XSDT not implemented yet\n");
     return;
   }
 
   const AcpiSdtHeader *rsdt = phys_to_cptr(rsdp->RsdtAddress);
 
-  kprintf("ACPI: RSDT @ 0x%llx\n", (uint64_t)rsdp->RsdtAddress);
+  ACPI_DBG("acpi: RSDT @ 0x%llx\n", (unsigned long long)rsdp->RsdtAddress);
 
   if (!sig4_eq(rsdt->Signature, "RSDT")){
-    kprintf("ACPI: RSDT sig mismatch: ");
+    ACPI_ERR("acpi: RSDT sig mismatch: ");
     print_sig4(rsdt->Signature);
-    kprintf("\n");
+    ACPI_ERR("\n");
     return;
   }
 
   if (rsdt->Length < sizeof(AcpiSdtHeader)){
-    kprintf("ACPI: RSDT length too small\n");
+    ACPI_ERR("acpi: RSDT length too small\n");
     return;
   }
 
   if (!checksum_ok(rsdt, rsdt->Length)){
-    kprintf("ACPI: RSDT checksum FAIL\n");
+    ACPI_ERR("acpi: RSDT checksum FAIL\n");
     return;
   }
 
@@ -173,7 +186,7 @@ void acpi_probe(const BootInfo *bi){
   g_rsdt_ent = ent;
   g_rsdt_count = entry_count;
 
-  kprintf("ACPI: RSDT entries=%u\n", entry_count);
+  ACPI_DBG("acpi: RSDT entries=%u\n", (unsigned)entry_count);
 
   const AcpiMadt *madt = 0;
 
@@ -181,11 +194,10 @@ void acpi_probe(const BootInfo *bi){
     uint64_t phys = (uint64_t)ent[i];
     const AcpiSdtHeader *h = phys_to_cptr(phys);
 
-    kprintf("ACPI: [");
-    kprintf("%u", i);
-    kprintf("] ");
+    // table listing is noisy => DBG
+    ACPI_DBG("acpi: [%u] ", (unsigned)i);
     print_sig4(h->Signature);
-    kprintf(" @ 0x%llx len=%u\n", phys, h->Length);
+    ACPI_DBG(" @ 0x%llx len=%u\n", (unsigned long long)phys, (unsigned)h->Length);
 
     if (sig4_eq(h->Signature, "APIC")){
       madt = (const AcpiMadt*)h;
@@ -193,15 +205,14 @@ void acpi_probe(const BootInfo *bi){
   }
 
   if (!madt){
-    kprintf("ACPI: MADT (APIC) not found\n");
+    ACPI_WARN("acpi: MADT (APIC) not found\n");
     return;
   }
 
   if (!checksum_ok(madt, madt->Hdr.Length)){
-    kprintf("ACPI: MADT checksum FAIL\n");
+    ACPI_ERR("acpi: MADT checksum FAIL\n");
     return;
   }
-
 
   madt_dump(madt);
 }
